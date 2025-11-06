@@ -8,7 +8,7 @@ import streamlit.components.v1 as components
 
 # === Seiteneinstellungen ===
 st.set_page_config(page_title="Optionsanalyse mit OptionCharts.io", layout="wide")
-st.title("📊 S&P 500 Downloader + Optionsanalyse (mit IV & Delta von OptionCharts.io)")
+st.title("📊 S&P 500 Downloader + Optionsanalyse (IV & Delta von OptionCharts.io)")
 
 # === Basisdateien ===
 base_path = os.path.dirname(__file__)
@@ -89,7 +89,7 @@ st.markdown("---")
 # ------------------------------------------------------------
 # 🟩 2️⃣ Bereich: Optionsanalyse
 # ------------------------------------------------------------
-st.header("📊 Optionsanalyse für ausgewählte Aktien (IV + Delta von OptionCharts.io)")
+st.header("📊 Optionsanalyse für ausgewählte Aktien (mit IV + Delta)")
 
 # === Eingabe der Ticker ===
 st.subheader("1️⃣ Aktienauswahl")
@@ -143,8 +143,7 @@ if tickers_list and expiry_input:
     st.subheader("4️⃣ Ergebnisse")
 
     expiry_date = datetime.strptime(expiry_input, "%Y-%m-%d").date()
-
-    all_results = []  # Für späteren CSV-Export
+    all_results = []
 
     for symbol in tickers_list:
         try:
@@ -158,12 +157,31 @@ if tickers_list and expiry_input:
 
             # --- Daten von OptionCharts.io abrufen ---
             url = f"https://optioncharts.io/api/option_chain?symbol={symbol}&type=put&expiration={expiry_input}"
-            response = requests.get(url, timeout=10)
+            headers = {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/121.0 Safari/537.36"
+                ),
+                "Accept": "application/json, text/plain, */*",
+                "Referer": f"https://optioncharts.io/options/{symbol}/option-chain"
+            }
 
-            if response.status_code != 200:
+            try:
+                response = requests.get(url, headers=headers, timeout=10)
+                if response.status_code != 200:
+                    st.warning(f"{symbol}: OptionCharts antwortet mit {response.status_code}")
+                    continue
+
+                if not response.text.strip().startswith("["):
+                    st.warning(f"{symbol}: keine JSON-Daten erhalten.")
+                    continue
+
+                data = response.json()
+            except Exception as e:
+                st.warning(f"{symbol}: Abruffehler ({e})")
                 continue
 
-            data = response.json()
             if not data or not isinstance(data, list):
                 continue
 
@@ -183,7 +201,7 @@ if tickers_list and expiry_input:
             ].sort_values("strike", ascending=True)
 
             if filtered.empty:
-                continue  # Überspringt leere Ergebnisse
+                continue
 
             st.markdown(f"<hr style='border:3px solid #444;margin:20px 0;'>", unsafe_allow_html=True)
             st.markdown(f"### 🟦 {symbol} — {company_name}")
@@ -215,11 +233,10 @@ if tickers_list and expiry_input:
             with st.expander(f"📈 Chart anzeigen ({symbol})", expanded=False):
                 components.html(chart_html, height=400)
 
-            # Ausgabe
             filtered["impliedVolatility_%"] = filtered["impliedVolatility"] * 100
             st.dataframe(
                 filtered[[
-                    "strike", "bid", "ask", "volume" if "volume" in filtered.columns else "bid",
+                    "strike", "bid", "ask",
                     "Rendite_%_p.a.", "Sicherheitsabstand_%", "impliedVolatility_%", "delta"
                 ]],
                 use_container_width=True
