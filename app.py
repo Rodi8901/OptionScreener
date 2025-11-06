@@ -3,6 +3,7 @@ import pandas as pd
 import yfinance as yf
 import os, time
 
+# === Seiteneinstellungen ===
 st.set_page_config(page_title="S&P 500 Aktien Screener", layout="wide")
 st.title("📊 S&P 500 Aktien Screener")
 
@@ -13,11 +14,12 @@ min_price = st.sidebar.number_input("Min. Preis ($)", 1, 500, 20)
 max_price = st.sidebar.number_input("Max. Preis ($)", 1, 1000, 70)
 min_volume = st.sidebar.number_input("Min. Ø Volumen (Mio)", 0.1, 100.0, 1.0, step=0.1)
 
+# === Dateipfade ===
 base_path = os.path.dirname(__file__)
 sp500_path = os.path.join(base_path, "sp500.csv")
 data_path = os.path.join(base_path, "sp500_data.csv")
 
-# === 1️⃣ S&P500-Liste laden ===
+# === S&P500-Liste laden ===
 @st.cache_data
 def load_sp500_list():
     if not os.path.exists(sp500_path):
@@ -30,7 +32,10 @@ def load_sp500_list():
 sp500_df = load_sp500_list()
 tickers = sp500_df["Symbol"].tolist()
 
-# === 2️⃣ Live-Daten abrufen und CSV speichern ===
+# Für Tests kann man hier begrenzen:
+# tickers = tickers[:50]
+
+# === Funktion: Daten-Update von Yahoo Finance ===
 def update_sp500_data():
     rows = []
     st.info("⏳ Lade Echtzeitdaten von Yahoo Finance... (dies kann einige Minuten dauern)")
@@ -39,22 +44,37 @@ def update_sp500_data():
     for i, t in enumerate(tickers):
         try:
             ticker_obj = yf.Ticker(t)
-            fast = ticker_obj.fast_info or {}
             info = ticker_obj.info or {}
+            hist = ticker_obj.history(period="1d")
+
+            price = None
+            volume = None
+
+            # Primäre Quelle: history()
+            if not hist.empty:
+                price = hist["Close"].iloc[-1]
+                volume = hist["Volume"].iloc[-1]
+
+            # Fallbacks aus info
+            if not price:
+                price = info.get("regularMarketPrice", 0)
+            if not volume:
+                volume = info.get("averageVolume", 0)
 
             rows.append({
                 "Symbol": t,
-                "Price": fast.get("last_price", 0),
+                "Price": round(price, 2) if price else 0,
                 "MarketCap_Mrd": (info.get("marketCap", 0) / 1e9) if info.get("marketCap") else 0,
-                "Volume_Mio": (fast.get("ten_day_average_volume", 0) / 1e6),
+                "Volume_Mio": round((volume / 1e6), 2) if volume else 0,
                 "PERatio": info.get("trailingPE", 0),
                 "Country": info.get("country", ""),
                 "Optionable": info.get("optionable", False)
             })
+
         except Exception as e:
             print(f"Fehler bei {t}: {e}")
-        progress.progress((i+1)/len(tickers))
-        time.sleep(0.05)
+        progress.progress((i + 1) / len(tickers))
+        time.sleep(0.05)  # kleine Pause zur Schonung der API
 
     df = pd.DataFrame(rows)
     df.to_csv(data_path, index=False)
@@ -62,16 +82,16 @@ def update_sp500_data():
     st.dataframe(df.head())
     return df
 
-# === 3️⃣ Button zum Daten-Update ===
+# === Button zum Daten-Update ===
 if st.button("📦 Daten aktualisieren"):
     with st.spinner("Aktualisiere Daten..."):
         update_sp500_data()
 
-# === 4️⃣ Lokale Daten laden (wenn vorhanden) ===
+# === Lokale CSV laden ===
 @st.cache_data
 def load_data():
     if not os.path.exists(data_path):
-        st.warning("⚠️ Noch keine Datei 'sp500_data.csv' gefunden. Bitte erst aktualisieren.")
+        st.warning("⚠️ Noch keine Datei 'sp500_data.csv' gefunden. Bitte zuerst 'Daten aktualisieren' klicken.")
         return pd.DataFrame()
     df = pd.read_csv(data_path)
     return df
@@ -81,7 +101,7 @@ data_df = load_data()
 if data_df.empty:
     st.stop()
 
-# === 5️⃣ Filter anwenden ===
+# === Filter anwenden ===
 filtered = data_df[
     (data_df["MarketCap_Mrd"] >= min_marketcap) &
     (data_df["Price"] >= min_price) &
@@ -92,7 +112,7 @@ filtered = data_df[
     (data_df["Optionable"] == True)
 ]
 
-# === 6️⃣ Ergebnisse anzeigen ===
+# === Ergebnis anzeigen ===
 st.subheader(f"✅ Gefundene Aktien: {len(filtered)}")
 
 if len(filtered) > 0:
@@ -102,6 +122,8 @@ if len(filtered) > 0:
         ],
         use_container_width=True
     )
+else:
+    st.info("Keine Aktien erfüllen aktuell die Filterbedingungen.")
 
 # === Download-Button ===
 if len(filtered) > 0:
