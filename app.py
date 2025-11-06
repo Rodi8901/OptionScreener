@@ -1,13 +1,14 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
+import requests
 import os, time
 from datetime import datetime
 import streamlit.components.v1 as components
 
 # === Seiteneinstellungen ===
-st.set_page_config(page_title="S&P 500 Downloader + Optionsanalyse", layout="wide")
-st.title("📊 S&P 500 Fundamentaldaten & Optionsanalyse")
+st.set_page_config(page_title="Optionsanalyse mit OptionCharts.io", layout="wide")
+st.title("📊 S&P 500 Downloader + Optionsanalyse (mit IV & Delta von OptionCharts.io)")
 
 # === Basisdateien ===
 base_path = os.path.dirname(__file__)
@@ -88,7 +89,7 @@ st.markdown("---")
 # ------------------------------------------------------------
 # 🟩 2️⃣ Bereich: Optionsanalyse
 # ------------------------------------------------------------
-st.header("📊 Optionsanalyse für ausgewählte Aktien")
+st.header("📊 Optionsanalyse für ausgewählte Aktien (IV + Delta von OptionCharts.io)")
 
 # === Eingabe der Ticker ===
 st.subheader("1️⃣ Aktienauswahl")
@@ -103,7 +104,6 @@ else:
 
 # === Laufzeit-Auswahl ===
 st.subheader("2️⃣ Laufzeit")
-
 expiry_input = None
 available_expirations = []
 
@@ -112,31 +112,21 @@ if tickers_list:
     try:
         sample_ticker = yf.Ticker(first_symbol)
         available_expirations = sample_ticker.options
-
-        if available_expirations and len(available_expirations) > 0:
+        if available_expirations:
             st.success(f"📅 Verfügbare Laufzeiten für {first_symbol}:")
             expiry_input = st.selectbox(
                 "Wähle eine Optionslaufzeit:",
                 available_expirations,
-                index=min(2, len(available_expirations) - 1)
+                index=min(2, len(available_expirations)-1)
             )
         else:
-            st.warning(f"Keine Optionsdaten für {first_symbol} gefunden.")
             expiry_input = st.text_input(
-                "Kein Datum gefunden – gib das Ablaufdatum manuell ein (YYYY-MM-DD):",
-                placeholder="2025-12-19"
+                "Manuelle Eingabe (YYYY-MM-DD):", placeholder="2025-12-19"
             )
-
     except Exception as e:
-        st.warning(f"Konnte keine Laufzeiten abrufen ({first_symbol}): {e}")
-        expiry_input = st.text_input(
-            "Fehler beim Abruf – gib das Ablaufdatum manuell ein (YYYY-MM-DD):",
-            placeholder="2025-12-19"
-        )
-
+        st.warning(f"Fehler beim Abruf: {e}")
 else:
-    st.info("Bitte gib zuerst deine Ticker ein, um verfügbare Laufzeiten zu laden.")
-    expiry_input = None
+    st.info("Bitte gib zuerst deine Ticker ein.")
 
 # === Filter-Einstellungen ===
 st.subheader("3️⃣ Filtereinstellungen")
@@ -146,15 +136,15 @@ with col1:
 with col2:
     min_sicherheit = st.number_input("Min. Sicherheitsabstand (%)", 0.0, 50.0, 5.0, step=0.5)
 
-# === Analyse starten ===
+# ------------------------------------------------------------
+# 🧮 4️⃣ Ergebnisse mit OptionCharts.io
+# ------------------------------------------------------------
 if tickers_list and expiry_input:
     st.subheader("4️⃣ Ergebnisse")
 
-    try:
-        expiry_date = datetime.strptime(expiry_input, "%Y-%m-%d").date()
-    except ValueError:
-        st.error("⚠️ Ungültiges Datumsformat. Bitte YYYY-MM-DD verwenden.")
-        st.stop()
+    expiry_date = datetime.strptime(expiry_input, "%Y-%m-%d").date()
+
+    all_results = []  # Für späteren CSV-Export
 
     for symbol in tickers_list:
         try:
@@ -166,37 +156,40 @@ if tickers_list and expiry_input:
             if not current_price:
                 continue
 
-            if expiry_input not in ticker.options:
+            # --- Daten von OptionCharts.io abrufen ---
+            url = f"https://optioncharts.io/api/option_chain?symbol={symbol}&type=put&expiration={expiry_input}"
+            response = requests.get(url, timeout=10)
+
+            if response.status_code != 200:
                 continue
 
-            chain = ticker.option_chain(expiry_input)
-            puts = chain.puts.copy()
-            puts = puts[["strike", "lastPrice", "bid", "ask", "volume", "impliedVolatility"]].fillna(0)
-            puts["mid"] = (puts["bid"] + puts["ask"]) / 2
+            data = response.json()
+            if not data or not isinstance(data, list):
+                continue
 
-            # --- Kennzahlen ---
-            puts["Sicherheitsabstand_%"] = (current_price - puts["strike"]) / current_price * 100
-            puts["Prämie_$"] = puts["bid"] * 100
-            puts["Resttage"] = (expiry_date - datetime.now().date()).days
-            puts["Rendite_%_p.a."] = (
-                (puts["Prämie_$"] / (puts["strike"] * 100)) *
-                (365 / puts["Resttage"]) * 100
-            )
+            df = pd.DataFrame(data)
+            df = df[["strike", "bid", "ask", "impliedVolatility", "delta"]].fillna(0)
 
-            # --- Filter & Sortierung ---
-            filtered = puts[
-                (puts["Sicherheitsabstand_%"] >= min_sicherheit) &
-                (puts["Rendite_%_p.a."] >= min_rendite)
+            # Kennzahlen berechnen
+            df["Sicherheitsabstand_%"] = (current_price - df["strike"]) / current_price * 100
+            df["Prämie_$"] = df["bid"] * 100
+            df["Resttage"] = (expiry_date - datetime.now().date()).days
+            df["Rendite_%_p.a."] = (df["Prämie_$"] / (df["strike"] * 100)) * (365 / df["Resttage"]) * 100
+
+            # Filter & Sortierung
+            filtered = df[
+                (df["Sicherheitsabstand_%"] >= min_sicherheit) &
+                (df["Rendite_%_p.a."] >= min_rendite)
             ].sort_values("strike", ascending=True)
 
             if filtered.empty:
-                continue  # 👉 Überspringt leere Ergebnisse komplett
+                continue  # Überspringt leere Ergebnisse
 
-            # === Ausgabe nur für Treffer ===
             st.markdown(f"<hr style='border:3px solid #444;margin:20px 0;'>", unsafe_allow_html=True)
             st.markdown(f"### 🟦 {symbol} — {company_name}")
+            st.write(f"**Aktueller Kurs:** ${current_price:.2f}")
 
-            # === TradingView Chart (höher) ===
+            # === TradingView Chart ===
             chart_html = f"""
             <div class="tradingview-widget-container" style="height:380px;width:100%;margin-bottom:10px;">
               <div id="tradingview_{symbol.lower()}"></div>
@@ -222,16 +215,32 @@ if tickers_list and expiry_input:
             with st.expander(f"📈 Chart anzeigen ({symbol})", expanded=False):
                 components.html(chart_html, height=400)
 
-            st.write(f"**Aktueller Kurs:** ${current_price:.2f}")
+            # Ausgabe
+            filtered["impliedVolatility_%"] = filtered["impliedVolatility"] * 100
             st.dataframe(
-                filtered[
-                    ["strike", "bid", "ask", "volume", "Rendite_%_p.a.", "Sicherheitsabstand_%"]
-                ],
+                filtered[[
+                    "strike", "bid", "ask", "volume" if "volume" in filtered.columns else "bid",
+                    "Rendite_%_p.a.", "Sicherheitsabstand_%", "impliedVolatility_%", "delta"
+                ]],
                 use_container_width=True
             )
+
+            filtered["Symbol"] = symbol
+            all_results.append(filtered)
 
         except Exception as e:
             st.warning(f"Fehler bei {symbol}: {e}")
 
+    # CSV-Export
+    if all_results:
+        combined = pd.concat(all_results, ignore_index=True)
+        csv_data = combined.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "📥 Gefundene Optionen als CSV exportieren",
+            csv_data,
+            "filtered_options.csv",
+            "text/csv"
+        )
+
 else:
-    st.info("Bitte gib oben deine Ticker und das Ablaufdatum ein, um die Analyse zu starten.")
+    st.info("Bitte gib oben deine Ticker und Laufzeit ein.")
