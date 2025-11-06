@@ -182,7 +182,7 @@ if tickers_list and expiry_input:
             filtered = puts[
                 (puts["Sicherheitsabstand_%"] >= min_sicherheit) &
                 (puts["Rendite_%_p.a."] >= min_rendite)
-            ].sort_values("Rendite_%_p.a.", ascending=False)
+            ].sort_values("Rendite_%_p.a.", ascending=True)
 
             if filtered.empty:
                 st.info(f"Keine passenden Puts für {symbol} gefunden (nach deinen Kriterien).")
@@ -191,7 +191,7 @@ if tickers_list and expiry_input:
             st.write(f"**Aktueller Kurs:** ${current_price:.2f}")
             st.dataframe(
                 filtered[
-                    ["strike", "bid", "ask", "volume", "Sicherheitsabstand_%", "Rendite_%_p.a."]
+                    ["strike", "bid", "ask", "volume", "Rendite_%_p.a.", "Sicherheitsabstand_%"]
                 ],
                 use_container_width=True
             )
