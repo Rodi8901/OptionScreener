@@ -30,6 +30,9 @@ def load_sp500_list():
 tickers, sp500_df = load_sp500_list()
 st.success(f"{len(tickers)} S&P 500 Aktien geladen.")
 
+# Testmodus – nur 30 Titel abrufen (schneller)
+tickers = tickers[:30]
+
 # === Hole Finanzdaten ===
 @st.cache_data(show_spinner=False)
 def get_stock_info(ticker):
