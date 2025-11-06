@@ -2,7 +2,9 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import os, time
+import streamlit.components.v1 as components  # GANZ OBEN EINMAL EINBINDEN!
 from datetime import datetime
+
 
 # === Seiteneinstellungen ===
 st.set_page_config(page_title="S&P 500 Downloader + Optionsanalyse", layout="wide")
@@ -156,7 +158,7 @@ if tickers_list and expiry_input:
 
             st.markdown(f"### 🟦 {symbol} — {company_name}")
 
-            # === Mini-Chart per TradingView ===
+            # === Mini-Chart pro Aktie ===
 chart_html = f"""
 <div class="tradingview-widget-container" style="height:260px;width:100%;margin-bottom:10px;">
   <div id="tradingview_{symbol.lower()}"></div>
@@ -171,7 +173,6 @@ chart_html = f"""
       "theme": "dark",
       "style": "1",
       "locale": "en",
-      "toolbar_bg": "#f1f3f6",
       "hide_side_toolbar": true,
       "allow_symbol_change": false,
       "save_image": false,
@@ -181,7 +182,7 @@ chart_html = f"""
 </div>
 """
 with st.expander(f"📈 Chart anzeigen ({symbol})", expanded=False):
-    st.components.v1.html(chart_html, height=280)
+    components.html(chart_html, height=280)
             
             if not current_price:
                 st.warning(f"Keine Kursdaten für {symbol} gefunden.")
