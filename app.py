@@ -24,7 +24,7 @@ st.write(f"- Market Cap > {min_marketcap} Mrd $  \n"
 # === Lade S&P500 Tickers aus lokaler CSV ===
 @st.cache_data
 def load_sp500_list():
-    df = pd.read_csv("SP500.csv")
+    df = pd.read_csv("sp500.csv")
     return df["Symbol"].tolist(), df
 
 tickers, sp500_df = load_sp500_list()
