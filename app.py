@@ -157,48 +157,16 @@ if tickers_list and expiry_input:
         st.stop()
 
     for symbol in tickers_list:
-        st.markdown(f"<hr style='border:3px solid #444;margin:20px 0;'>", unsafe_allow_html=True)
-
         try:
             ticker = yf.Ticker(symbol)
             info = ticker.info
             current_price = info.get("regularMarketPrice", None)
             company_name = info.get("shortName", "")
 
-            st.markdown(f"### 🟦 {symbol} — {company_name}")
-
-            # === Mini-Chart pro Aktie ===
-            chart_html = f"""
-            <div class="tradingview-widget-container" style="height:260px;width:100%;margin-bottom:10px;">
-              <div id="tradingview_{symbol.lower()}"></div>
-              <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-              <script type="text/javascript">
-                new TradingView.widget({{
-                  "width": "100%",
-                  "height": "260",
-                  "symbol": "{symbol}",
-                  "interval": "D",
-                  "timezone": "Etc/UTC",
-                  "theme": "dark",
-                  "style": "1",
-                  "locale": "en",
-                  "hide_side_toolbar": true,
-                  "allow_symbol_change": false,
-                  "save_image": false,
-                  "container_id": "tradingview_{symbol.lower()}"
-                }});
-              </script>
-            </div>
-            """
-            with st.expander(f"📈 Chart anzeigen ({symbol})", expanded=False):
-                components.html(chart_html, height=280)
-
             if not current_price:
-                st.warning(f"Keine Kursdaten für {symbol} gefunden.")
                 continue
 
             if expiry_input not in ticker.options:
-                st.warning(f"{symbol}: Kein Verfall am {expiry_input} verfügbar. Verfügbare Termine: {ticker.options}")
                 continue
 
             chain = ticker.option_chain(expiry_input)
@@ -222,8 +190,37 @@ if tickers_list and expiry_input:
             ].sort_values("strike", ascending=True)
 
             if filtered.empty:
-                st.info(f"Keine passenden Puts für {symbol} gefunden (nach deinen Kriterien).")
-                continue
+                continue  # 👉 Überspringt leere Ergebnisse komplett
+
+            # === Ausgabe nur für Treffer ===
+            st.markdown(f"<hr style='border:3px solid #444;margin:20px 0;'>", unsafe_allow_html=True)
+            st.markdown(f"### 🟦 {symbol} — {company_name}")
+
+            # === TradingView Chart (höher) ===
+            chart_html = f"""
+            <div class="tradingview-widget-container" style="height:380px;width:100%;margin-bottom:10px;">
+              <div id="tradingview_{symbol.lower()}"></div>
+              <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+              <script type="text/javascript">
+                new TradingView.widget({{
+                  "width": "100%",
+                  "height": "380",
+                  "symbol": "{symbol}",
+                  "interval": "D",
+                  "timezone": "Etc/UTC",
+                  "theme": "dark",
+                  "style": "1",
+                  "locale": "en",
+                  "hide_side_toolbar": true,
+                  "allow_symbol_change": false,
+                  "save_image": false,
+                  "container_id": "tradingview_{symbol.lower()}"
+                }});
+              </script>
+            </div>
+            """
+            with st.expander(f"📈 Chart anzeigen ({symbol})", expanded=False):
+                components.html(chart_html, height=400)
 
             st.write(f"**Aktueller Kurs:** ${current_price:.2f}")
             st.dataframe(
