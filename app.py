@@ -53,6 +53,12 @@ def load_yf_data(tickers):
 with st.spinner("Lade Daten von Yahoo Finance..."):
     df = load_yf_data(tickers)
 
+st.write("🔍 Vorschau der geladenen Daten:")
+st.write(df.head())
+st.write("Spalten:", list(df.columns))
+st.write("Anzahl Zeilen:", len(df))
+
+
 # --- Filter anwenden ---
 filtered = df.copy()
 
