@@ -54,15 +54,7 @@ with st.spinner("Lade Daten von Yahoo Finance..."):
     df = load_yf_data(tickers)
 
 # --- Filter anwenden ---
-filtered = df[
-    (df["MarketCap_Mrd"] >= min_marketcap) &
-    (df["Price"] >= min_price) &
-    (df["Price"] <= max_price) &
-    (df["Volume_Mio"] >= min_volume) &
-    (df["PERatio"] > 0) &
-    (df["Optionable"] == True) &
-    (df["Country"].isin(["United States", "USA", "US"]))
-]
+filtered = df.copy()
 
 st.subheader(f"✅ Gefundene Aktien: {len(filtered)}")
 st.dataframe(
