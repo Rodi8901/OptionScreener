@@ -156,6 +156,33 @@ if tickers_list and expiry_input:
 
             st.markdown(f"### 🟦 {symbol} — {company_name}")
 
+            # === Mini-Chart per TradingView ===
+chart_html = f"""
+<div class="tradingview-widget-container" style="height:260px;width:100%;margin-bottom:10px;">
+  <div id="tradingview_{symbol.lower()}"></div>
+  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+  <script type="text/javascript">
+    new TradingView.widget({{
+      "width": "100%",
+      "height": "260",
+      "symbol": "{symbol}",
+      "interval": "D",
+      "timezone": "Etc/UTC",
+      "theme": "dark",
+      "style": "1",
+      "locale": "en",
+      "toolbar_bg": "#f1f3f6",
+      "hide_side_toolbar": true,
+      "allow_symbol_change": false,
+      "save_image": false,
+      "container_id": "tradingview_{symbol.lower()}"
+    }});
+  </script>
+</div>
+"""
+with st.expander(f"📈 Chart anzeigen ({symbol})", expanded=False):
+    st.components.v1.html(chart_html, height=280)
+            
             if not current_price:
                 st.warning(f"Keine Kursdaten für {symbol} gefunden.")
                 continue
