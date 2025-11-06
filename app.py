@@ -20,6 +20,7 @@ sp500_path = os.path.join(base_path, "sp500.csv")
 data_path = os.path.join(base_path, "sp500_data.csv")
 
 # === S&P500-Liste laden ===
+@st.cache_data
 def load_sp500_list():
     if not os.path.exists(sp500_path):
         st.error("❌ Datei 'sp500.csv' fehlt im Projektordner!")
@@ -31,7 +32,7 @@ def load_sp500_list():
 sp500_df = load_sp500_list()
 tickers = sp500_df["Symbol"].tolist()
 
-# Für Tests: Begrenze Anzahl (z. B. 50)
+# Für Tests kann man hier begrenzen:
 # tickers = tickers[:50]
 
 # === Funktion: Daten-Update von Yahoo Finance ===
@@ -46,17 +47,18 @@ def update_sp500_data():
             info = ticker_obj.info or {}
             hist = ticker_obj.history(period="1d")
 
-            price, volume = 0, 0
+            price = None
+            volume = None
 
             # Primäre Quelle: history()
             if not hist.empty:
-                price = float(hist["Close"].iloc[-1])
-                volume = float(hist["Volume"].iloc[-1])
+                price = hist["Close"].iloc[-1]
+                volume = hist["Volume"].iloc[-1]
 
             # Fallbacks aus info
-            if price == 0:
+            if not price:
                 price = info.get("regularMarketPrice", 0)
-            if volume == 0:
+            if not volume:
                 volume = info.get("averageVolume", 0)
 
             rows.append({
@@ -72,7 +74,7 @@ def update_sp500_data():
         except Exception as e:
             print(f"Fehler bei {t}: {e}")
         progress.progress((i + 1) / len(tickers))
-        time.sleep(0.05)  # kleine Pause, um API-Limit zu schonen
+        time.sleep(0.05)  # kleine Pause zur Schonung der API
 
     df = pd.DataFrame(rows)
     df.to_csv(data_path, index=False)
@@ -80,25 +82,24 @@ def update_sp500_data():
     st.dataframe(df.head())
     return df
 
-# === Button: Daten-Update starten ===
+# === Button zum Daten-Update ===
 if st.button("📦 Daten aktualisieren"):
     with st.spinner("Aktualisiere Daten..."):
         update_sp500_data()
 
-# === CSV-Daten immer frisch laden (ohne Cache) ===
-if not os.path.exists(data_path):
-    st.warning("⚠️ Noch keine Datei 'sp500_data.csv' gefunden. Bitte zuerst 'Daten aktualisieren' klicken.")
-    st.stop()
+# === Lokale CSV laden ===
+@st.cache_data
+def load_data():
+    if not os.path.exists(data_path):
+        st.warning("⚠️ Noch keine Datei 'sp500_data.csv' gefunden. Bitte zuerst 'Daten aktualisieren' klicken.")
+        return pd.DataFrame()
+    df = pd.read_csv(data_path)
+    return df
 
-try:
-    data_df = pd.read_csv(data_path)
-except Exception as e:
-    st.error(f"❌ Fehler beim Laden der Daten: {e}")
-    st.stop()
+data_df = load_data()
 
-# === Rohdaten-Vorschau ===
-with st.expander("🔍 Rohdaten anzeigen"):
-    st.write(data_df.head())
+if data_df.empty:
+    st.stop()
 
 # === Filter anwenden ===
 filtered = data_df[
