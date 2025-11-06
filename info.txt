@@ -1,0 +1,3 @@
+https://datahub.io/core/s-and-p-500-companies/r/constituents.csv
+https://datahub.io/core/nasdaq-listings/_r/-/data/nasdaq-listed.csv
+https://datahub.io/core/nasdaq-listings
