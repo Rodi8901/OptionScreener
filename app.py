@@ -2,9 +2,8 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import os, time
-import streamlit.components.v1 as components  # GANZ OBEN EINMAL EINBINDEN!
 from datetime import datetime
-
+import streamlit.components.v1 as components
 
 # === Seiteneinstellungen ===
 st.set_page_config(page_title="S&P 500 Downloader + Optionsanalyse", layout="wide")
@@ -31,9 +30,6 @@ def load_sp500_list():
 sp500_df = load_sp500_list()
 tickers = sp500_df["Symbol"].tolist()
 st.write(f"🔹 {len(tickers)} S&P 500 Aktien gefunden.")
-
-# Testweise begrenzen (optional)
-# tickers = tickers[:30]
 
 def download_yf_data(tickers):
     results = []
@@ -108,26 +104,39 @@ else:
 # === Laufzeit-Auswahl ===
 st.subheader("2️⃣ Laufzeit")
 
+expiry_input = None
 available_expirations = []
-if tickers_list:
-    # Hole die Expirations vom ersten Ticker (alle haben meist gleiche Standarddaten)
-    try:
-        sample_ticker = yf.Ticker(tickers_list[0])
-        available_expirations = sample_ticker.options
-    except Exception as e:
-        st.warning(f"Konnte keine Laufzeiten abrufen: {e}")
 
-if available_expirations:
-    expiry_input = st.selectbox(
-        "Wähle eine Laufzeit:",
-        available_expirations,
-        index=min(2, len(available_expirations)-1)
-    )
+if tickers_list:
+    first_symbol = tickers_list[0]
+    try:
+        sample_ticker = yf.Ticker(first_symbol)
+        available_expirations = sample_ticker.options
+
+        if available_expirations and len(available_expirations) > 0:
+            st.success(f"📅 Verfügbare Laufzeiten für {first_symbol}:")
+            expiry_input = st.selectbox(
+                "Wähle eine Optionslaufzeit:",
+                available_expirations,
+                index=min(2, len(available_expirations) - 1)
+            )
+        else:
+            st.warning(f"Keine Optionsdaten für {first_symbol} gefunden.")
+            expiry_input = st.text_input(
+                "Kein Datum gefunden – gib das Ablaufdatum manuell ein (YYYY-MM-DD):",
+                placeholder="2025-12-19"
+            )
+
+    except Exception as e:
+        st.warning(f"Konnte keine Laufzeiten abrufen ({first_symbol}): {e}")
+        expiry_input = st.text_input(
+            "Fehler beim Abruf – gib das Ablaufdatum manuell ein (YYYY-MM-DD):",
+            placeholder="2025-12-19"
+        )
+
 else:
-    expiry_input = st.text_input(
-        "Kein automatisches Datum verfügbar – manuell eingeben (YYYY-MM-DD):",
-        placeholder="2025-12-19"
-    )
+    st.info("Bitte gib zuerst deine Ticker ein, um verfügbare Laufzeiten zu laden.")
+    expiry_input = None
 
 # === Filter-Einstellungen ===
 st.subheader("3️⃣ Filtereinstellungen")
@@ -159,31 +168,31 @@ if tickers_list and expiry_input:
             st.markdown(f"### 🟦 {symbol} — {company_name}")
 
             # === Mini-Chart pro Aktie ===
-chart_html = f"""
-<div class="tradingview-widget-container" style="height:260px;width:100%;margin-bottom:10px;">
-  <div id="tradingview_{symbol.lower()}"></div>
-  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-  <script type="text/javascript">
-    new TradingView.widget({{
-      "width": "100%",
-      "height": "260",
-      "symbol": "{symbol}",
-      "interval": "D",
-      "timezone": "Etc/UTC",
-      "theme": "dark",
-      "style": "1",
-      "locale": "en",
-      "hide_side_toolbar": true,
-      "allow_symbol_change": false,
-      "save_image": false,
-      "container_id": "tradingview_{symbol.lower()}"
-    }});
-  </script>
-</div>
-"""
-with st.expander(f"📈 Chart anzeigen ({symbol})", expanded=False):
-    components.html(chart_html, height=280)
-            
+            chart_html = f"""
+            <div class="tradingview-widget-container" style="height:260px;width:100%;margin-bottom:10px;">
+              <div id="tradingview_{symbol.lower()}"></div>
+              <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+              <script type="text/javascript">
+                new TradingView.widget({{
+                  "width": "100%",
+                  "height": "260",
+                  "symbol": "{symbol}",
+                  "interval": "D",
+                  "timezone": "Etc/UTC",
+                  "theme": "dark",
+                  "style": "1",
+                  "locale": "en",
+                  "hide_side_toolbar": true,
+                  "allow_symbol_change": false,
+                  "save_image": false,
+                  "container_id": "tradingview_{symbol.lower()}"
+                }});
+              </script>
+            </div>
+            """
+            with st.expander(f"📈 Chart anzeigen ({symbol})", expanded=False):
+                components.html(chart_html, height=280)
+
             if not current_price:
                 st.warning(f"Keine Kursdaten für {symbol} gefunden.")
                 continue
@@ -206,11 +215,11 @@ with st.expander(f"📈 Chart anzeigen ({symbol})", expanded=False):
                 (365 / puts["Resttage"]) * 100
             )
 
-            # --- Filter ---
+            # --- Filter & Sortierung ---
             filtered = puts[
                 (puts["Sicherheitsabstand_%"] >= min_sicherheit) &
                 (puts["Rendite_%_p.a."] >= min_rendite)
-            ].sort_values("Rendite_%_p.a.", ascending=True)
+            ].sort_values("strike", ascending=True)
 
             if filtered.empty:
                 st.info(f"Keine passenden Puts für {symbol} gefunden (nach deinen Kriterien).")
