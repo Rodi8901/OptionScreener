@@ -96,7 +96,6 @@ tickers_input = st.text_area(
     "Füge hier deine Ticker ein (jeweils in neuer Zeile, z. B. aus Excel):",
     placeholder="AAPL\nAMD\nMSFT\nGOOGL"
 )
-
 if tickers_input.strip():
     tickers_list = [t.strip().upper() for t in tickers_input.splitlines() if t.strip()]
 else:
@@ -114,24 +113,32 @@ if tickers_list:
         sample_ticker = yf.Ticker(first_symbol)
         available_expirations = sample_ticker.options
 
-        if available_expirations:
+        if available_expirations and len(available_expirations) > 0:
+            st.success(f"📅 Verfügbare Laufzeiten für {first_symbol}:")
             expiry_input = st.selectbox(
                 "Wähle eine Optionslaufzeit:",
                 available_expirations,
                 index=min(2, len(available_expirations) - 1)
             )
         else:
+            st.warning(f"Keine Optionsdaten für {first_symbol} gefunden.")
             expiry_input = st.text_input(
-                "Kein Datum gefunden – gib das Ablaufdatum manuell ein (YYYY-MM-DD):"
+                "Kein Datum gefunden – gib das Ablaufdatum manuell ein (YYYY-MM-DD):",
+                placeholder="2025-12-19"
             )
-    except Exception:
+
+    except Exception as e:
+        st.warning(f"Konnte keine Laufzeiten abrufen ({first_symbol}): {e}")
         expiry_input = st.text_input(
-            "Fehler beim Abruf – gib das Ablaufdatum manuell ein (YYYY-MM-DD):"
+            "Fehler beim Abruf – gib das Ablaufdatum manuell ein (YYYY-MM-DD):",
+            placeholder="2025-12-19"
         )
+
 else:
     st.info("Bitte gib zuerst deine Ticker ein, um verfügbare Laufzeiten zu laden.")
+    expiry_input = None
 
-# === Filter ===
+# === Filter-Einstellungen ===
 st.subheader("3️⃣ Filtereinstellungen")
 col1, col2 = st.columns(2)
 with col1:
@@ -139,46 +146,33 @@ with col1:
 with col2:
     min_sicherheit = st.number_input("Min. Sicherheitsabstand (%)", 0.0, 50.0, 5.0, step=0.5)
 
-# ------------------------------------------------------------
-# Hilfsfunktion Market Cap
-# ------------------------------------------------------------
-def format_market_cap(value):
-    if not value:
-        return "—"
-    if value >= 1e12:
-        return f"{value / 1e12:.2f} Bio. USD"
-    elif value >= 1e9:
-        return f"{value / 1e9:.2f} Mrd. USD"
-    else:
-        return f"{value / 1e6:.2f} Mio. USD"
-
-# === Analyse ===
+# === Analyse starten ===
 if tickers_list and expiry_input:
     st.subheader("4️⃣ Ergebnisse")
 
     try:
         expiry_date = datetime.strptime(expiry_input, "%Y-%m-%d").date()
     except ValueError:
-        st.error("⚠️ Ungültiges Datumsformat (YYYY-MM-DD).")
+        st.error("⚠️ Ungültiges Datumsformat. Bitte YYYY-MM-DD verwenden.")
         st.stop()
 
     for symbol in tickers_list:
         try:
             ticker = yf.Ticker(symbol)
             info = ticker.info
-
             current_price = info.get("regularMarketPrice", None)
             company_name = info.get("shortName", "")
-
-            # --- Market Cap robust ---
-            market_cap = info.get("marketCap", None)
-            if not market_cap:
-                shares = info.get("sharesOutstanding", None)
-                if shares and current_price:
-                    market_cap = shares * current_price
+            
+            # --- NEU: Marktkapitalisierung abrufen ---
+            market_cap_raw = info.get("marketCap", 0)
+            if market_cap_raw:
+                market_cap_str = f"{market_cap_raw / 1e9:.2f} Mrd. USD"
+            else:
+                market_cap_str = "n/a"
 
             if not current_price:
                 continue
+
             if expiry_input not in ticker.options:
                 continue
 
@@ -187,6 +181,7 @@ if tickers_list and expiry_input:
             puts = puts[["strike", "lastPrice", "bid", "ask", "volume", "impliedVolatility"]].fillna(0)
             puts["mid"] = (puts["bid"] + puts["ask"]) / 2
 
+            # --- Kennzahlen ---
             puts["Sicherheitsabstand_%"] = (current_price - puts["strike"]) / current_price * 100
             puts["Prämie_$"] = puts["bid"] * 100
             puts["Resttage"] = (expiry_date - datetime.now().date()).days
@@ -195,22 +190,48 @@ if tickers_list and expiry_input:
                 (365 / puts["Resttage"]) * 100
             )
 
+            # --- Filter & Sortierung ---
             filtered = puts[
                 (puts["Sicherheitsabstand_%"] >= min_sicherheit) &
                 (puts["Rendite_%_p.a."] >= min_rendite)
-            ].sort_values("strike")
+            ].sort_values("strike", ascending=True)
 
             if filtered.empty:
-                continue
+                continue  # 👉 Überspringt leere Ergebnisse komplett
 
-            st.markdown("<hr style='border:3px solid #444;margin:20px 0;'>", unsafe_allow_html=True)
+            # === Ausgabe nur für Treffer ===
+            st.markdown(f"<hr style='border:3px solid #444;margin:20px 0;'>", unsafe_allow_html=True)
             st.markdown(f"### 🟦 {symbol} — {company_name}")
 
-            st.write(
-                f"**Aktueller Kurs:** ${current_price:.2f}  \n"
-                f"**Market Cap:** {format_market_cap(market_cap)}"
-            )
+            # === TradingView Chart (höher) ===
+            chart_html = f"""
+            <div class="tradingview-widget-container" style="height:380px;width:100%;margin-bottom:10px;">
+              <div id="tradingview_{symbol.lower()}"></div>
+              <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+              <script type="text/javascript">
+                new TradingView.widget({{
+                  "width": "100%",
+                  "height": "380",
+                  "symbol": "{symbol}",
+                  "interval": "D",
+                  "timezone": "Etc/UTC",
+                  "theme": "dark",
+                  "style": "1",
+                  "locale": "en",
+                  "hide_side_toolbar": true,
+                  "allow_symbol_change": false,
+                  "save_image": false,
+                  "container_id": "tradingview_{symbol.lower()}"
+                }});
+              </script>
+            </div>
+            """
+            with st.expander(f"📈 Chart anzeigen ({symbol})", expanded=False):
+                components.html(chart_html, height=400)
 
+            # --- Angepasste Anzeige mit Marktkapitalisierung ---
+            st.write(f"**Aktueller Kurs:** ${current_price:.2f}  |  **Marktkapitalisierung:** {market_cap_str}")
+            
             st.dataframe(
                 filtered[
                     ["strike", "bid", "ask", "volume", "Rendite_%_p.a.", "Sicherheitsabstand_%"]
