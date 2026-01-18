@@ -232,7 +232,7 @@ if tickers_list and expiry_input:
             # --- NEU: Dynamischer Link zu OptionCharts.io ---
             # URL Aufbau: https://optioncharts.io/options/INTC/option-chain?option_type=put&expiration_dates=2026-01-23:m&view=list&strike_range=all
             # Hinweis: Wir nutzen das Datum ohne das ":m" Suffix, da dies universeller für alle Laufzeiten funktioniert.
-            oc_url = f"https://optioncharts.io/options/{symbol}/option-chain?option_type=put&expiration_dates={expiry_input}&view=list&strike_range=all"
+            oc_url = f"https://optioncharts.io/options/{symbol}/option-chain?option_type=put&expiration_dates={expiry_input}:m&view=list&strike_range=all"
 
             # Anzeige Kurs & Market Cap
             st.write(f"**Aktueller Kurs:** ${current_price:.2f}  |  **Marktkapitalisierung:** {market_cap_str}")
