@@ -162,6 +162,13 @@ if tickers_list and expiry_input:
             info = ticker.info
             current_price = info.get("regularMarketPrice", None)
             company_name = info.get("shortName", "")
+            
+            # --- NEU: Marktkapitalisierung abrufen ---
+            market_cap_raw = info.get("marketCap", 0)
+            if market_cap_raw:
+                market_cap_str = f"{market_cap_raw / 1e9:.2f} Mrd. USD"
+            else:
+                market_cap_str = "n/a"
 
             if not current_price:
                 continue
@@ -222,7 +229,9 @@ if tickers_list and expiry_input:
             with st.expander(f"📈 Chart anzeigen ({symbol})", expanded=False):
                 components.html(chart_html, height=400)
 
-            st.write(f"**Aktueller Kurs:** ${current_price:.2f}")
+            # --- Angepasste Anzeige mit Marktkapitalisierung ---
+            st.write(f"**Aktueller Kurs:** ${current_price:.2f}  |  **Marktkapitalisierung:** {market_cap_str}")
+            
             st.dataframe(
                 filtered[
                     ["strike", "bid", "ask", "volume", "Rendite_%_p.a.", "Sicherheitsabstand_%"]
