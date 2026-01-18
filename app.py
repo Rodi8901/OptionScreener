@@ -163,7 +163,7 @@ if tickers_list and expiry_input:
             current_price = info.get("regularMarketPrice", None)
             company_name = info.get("shortName", "")
             
-            # --- NEU: Marktkapitalisierung abrufen ---
+            # --- Marktkapitalisierung abrufen ---
             market_cap_raw = info.get("marketCap", 0)
             if market_cap_raw:
                 market_cap_str = f"{market_cap_raw / 1e9:.2f} Mrd. USD"
@@ -203,7 +203,7 @@ if tickers_list and expiry_input:
             st.markdown(f"<hr style='border:3px solid #444;margin:20px 0;'>", unsafe_allow_html=True)
             st.markdown(f"### 🟦 {symbol} — {company_name}")
 
-            # === TradingView Chart (höher) ===
+            # === TradingView Chart ===
             chart_html = f"""
             <div class="tradingview-widget-container" style="height:380px;width:100%;margin-bottom:10px;">
               <div id="tradingview_{symbol.lower()}"></div>
@@ -229,9 +229,30 @@ if tickers_list and expiry_input:
             with st.expander(f"📈 Chart anzeigen ({symbol})", expanded=False):
                 components.html(chart_html, height=400)
 
-            # --- Angepasste Anzeige mit Marktkapitalisierung ---
+            # --- NEU: Dynamischer Link zu OptionCharts.io ---
+            # URL Aufbau: https://optioncharts.io/options/INTC/option-chain?option_type=put&expiration_dates=2026-01-23:m&view=list&strike_range=all
+            # Hinweis: Wir nutzen das Datum ohne das ":m" Suffix, da dies universeller für alle Laufzeiten funktioniert.
+            oc_url = f"https://optioncharts.io/options/{symbol}/option-chain?option_type=put&expiration_dates={expiry_input}&view=list&strike_range=all"
+
+            # Anzeige Kurs & Market Cap
             st.write(f"**Aktueller Kurs:** ${current_price:.2f}  |  **Marktkapitalisierung:** {market_cap_str}")
             
+            # Button für externen Link (HTML für besseres Styling)
+            st.markdown(f"""
+                <a href="{oc_url}" target="_blank" style="
+                    display: inline-block;
+                    padding: 6px 12px;
+                    color: white;
+                    background-color: #262730;
+                    border: 1px solid #4e4f55;
+                    border-radius: 5px;
+                    text-decoration: none;
+                    font-size: 0.9em;
+                    margin-bottom: 10px;">
+                    🔗 OptionCharts.io Analyse für {symbol} ({expiry_input}) öffnen
+                </a>
+            """, unsafe_allow_html=True)
+
             st.dataframe(
                 filtered[
                     ["strike", "bid", "ask", "volume", "Rendite_%_p.a.", "Sicherheitsabstand_%"]
