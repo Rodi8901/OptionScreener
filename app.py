@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-import os, time
+import os, time, random
 from datetime import datetime
 import streamlit.components.v1 as components
 
@@ -35,9 +35,11 @@ def download_yf_data(tickers):
     results = []
     progress = st.progress(0)
     status = st.empty()
+    
     for i, t in enumerate(tickers):
         try:
             ticker_obj = yf.Ticker(t)
+            # Info abrufen (kann Rate-Limit triggern)
             info = ticker_obj.info or {}
             hist = ticker_obj.history(period="1d")
 
@@ -60,14 +62,21 @@ def download_yf_data(tickers):
                 "Sector": info.get("sector", "")
             })
         except Exception as e:
+            # Bei Fehler kurz warten, bevor es weitergeht
+            time.sleep(3)
             print(f"Fehler bei {t}: {e}")
+            
         progress.progress((i + 1) / len(tickers))
         status.text(f"{i+1}/{len(tickers)} Aktien verarbeitet…")
-        time.sleep(0.05)
+        
+        # === WICHTIG: Zufällige Pause gegen Rate-Limiting ===
+        # Warten zwischen 0.3 und 1.0 Sekunden
+        time.sleep(random.uniform(0.3, 1.0))
+        
     return pd.DataFrame(results)
 
-if st.button("📦 Daten jetzt von Yahoo Finance laden"):
-    with st.spinner("Lade Fundamentaldaten..."):
+if st.button("📦 Daten jetzt von Yahoo Finance laden (dauert etwas länger)"):
+    with st.spinner("Lade Fundamentaldaten (mit Pausen gegen Rate-Limit)..."):
         df = download_yf_data(tickers)
         if not df.empty:
             st.success(f"✅ {len(df)} Datensätze geladen!")
@@ -171,9 +180,12 @@ if tickers_list and expiry_input:
                 market_cap_str = "n/a"
 
             if not current_price:
+                # Kurze Pause auch bei Überspringen, um sicher zu gehen
+                time.sleep(random.uniform(0.2, 0.5))
                 continue
 
             if expiry_input not in ticker.options:
+                time.sleep(random.uniform(0.2, 0.5))
                 continue
 
             chain = ticker.option_chain(expiry_input)
@@ -196,8 +208,11 @@ if tickers_list and expiry_input:
                 (puts["Rendite_%_p.a."] >= min_rendite)
             ].sort_values("strike", ascending=True)
 
+            # === WICHTIG: Pause zwischen Options-Abrufen ===
+            time.sleep(random.uniform(0.5, 1.2))
+
             if filtered.empty:
-                continue  # 👉 Überspringt leere Ergebnisse komplett
+                continue
 
             # === Ausgabe nur für Treffer ===
             st.markdown(f"<hr style='border:3px solid #444;margin:20px 0;'>", unsafe_allow_html=True)
@@ -229,15 +244,13 @@ if tickers_list and expiry_input:
             with st.expander(f"📈 Chart anzeigen ({symbol})", expanded=False):
                 components.html(chart_html, height=400)
 
-            # --- NEU: Dynamischer Link zu OptionCharts.io ---
-            # URL Aufbau: https://optioncharts.io/options/INTC/option-chain?option_type=put&expiration_dates=2026-01-23:m&view=list&strike_range=all
-            # Hinweis: Wir nutzen das Datum ohne das ":m" Suffix, da dies universeller für alle Laufzeiten funktioniert.
-            oc_url = f"https://optioncharts.io/options/{symbol}/option-chain?option_type=put&expiration_dates={expiry_input}:m&view=list&strike_range=all"
+            # --- Dynamischer Link zu OptionCharts.io ---
+            oc_url = f"https://optioncharts.io/options/{symbol}/option-chain?option_type=put&expiration_dates={expiry_input}&view=list&strike_range=all"
 
             # Anzeige Kurs & Market Cap
             st.write(f"**Aktueller Kurs:** ${current_price:.2f}  |  **Marktkapitalisierung:** {market_cap_str}")
             
-            # Button für externen Link (HTML für besseres Styling)
+            # Button für externen Link
             st.markdown(f"""
                 <a href="{oc_url}" target="_blank" style="
                     display: inline-block;
@@ -262,6 +275,7 @@ if tickers_list and expiry_input:
 
         except Exception as e:
             st.warning(f"Fehler bei {symbol}: {e}")
+            time.sleep(2) # Kurze Pause bei Fehler
 
 else:
     st.info("Bitte gib oben deine Ticker und das Ablaufdatum ein, um die Analyse zu starten.")
