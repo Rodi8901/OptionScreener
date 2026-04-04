@@ -177,7 +177,6 @@ if analyze_btn and tickers_list and expiry_input:
                 ].copy()
 
                 if not filtered.empty:
-                    # Metadaten für die Gesamttabelle anhängen
                     filtered.insert(0, "Favorit", False)
                     filtered.insert(1, "Symbol", symbol)
                     filtered.insert(2, "Company", company_name)
@@ -189,7 +188,6 @@ if analyze_btn and tickers_list and expiry_input:
             except Exception as e:
                 st.warning(f"Fehler bei {symbol}: {e}")
 
-    # Ergebnisse im Session State speichern
     if all_filtered_options:
         st.session_state.options_data = pd.concat(all_filtered_options, ignore_index=True)
     else:
@@ -200,87 +198,90 @@ if analyze_btn and tickers_list and expiry_input:
 # === Ergebnisse & Interaktive Auswahl anzeigen ===
 if st.session_state.options_data is not None and not st.session_state.options_data.empty:
     st.subheader("4️⃣ Ergebnisse & Auswahl")
-    st.info("💡 Hake links die Optionen an, die du handeln oder beobachten möchtest. Sie werden unten gesammelt.")
+    st.info("💡 Nutze die Reiter (Tabs) unten, um zwischen den Aktien zu wechseln. Hake deine Favoriten an – die Ansicht springt nicht mehr weg!")
 
     df_master = st.session_state.options_data
     updated_dfs = []
-    symbols_found = df_master['Symbol'].unique()
+    symbols_found = list(df_master['Symbol'].unique())
 
-    for symbol in symbols_found:
-        df_sym = df_master[df_master['Symbol'] == symbol].copy()
-        company_name = df_sym['Company'].iloc[0]
-        current_price = df_sym['Kurs'].iloc[0]
-        market_cap_str = df_sym['MarketCap'].iloc[0]
+    # 🔹 NEU: Tabs statt durchgehender Liste erstellen
+    tabs = st.tabs(symbols_found)
 
-        st.markdown(f"<hr style='border:3px solid #444;margin:20px 0;'>", unsafe_allow_html=True)
-        st.markdown(f"### 🟦 {symbol} — {company_name}")
+    for tab, symbol in zip(tabs, symbols_found):
+        with tab:
+            df_sym = df_master[df_master['Symbol'] == symbol].copy()
+            company_name = df_sym['Company'].iloc[0]
+            current_price = df_sym['Kurs'].iloc[0]
+            market_cap_str = df_sym['MarketCap'].iloc[0]
 
-        # === TradingView Chart ===
-        chart_html = f"""
-        <div class="tradingview-widget-container" style="height:380px;width:100%;margin-bottom:10px;">
-          <div id="tradingview_{symbol.lower()}"></div>
-          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-          <script type="text/javascript">
-            new TradingView.widget({{
-              "width": "100%",
-              "height": "380",
-              "symbol": "{symbol}",
-              "interval": "D",
-              "timezone": "Etc/UTC",
-              "theme": "dark",
-              "style": "1",
-              "locale": "en",
-              "hide_side_toolbar": true,
-              "allow_symbol_change": false,
-              "save_image": false,
-              "studies": [
-                {{"id": "MASimple@tv-basicstudies", "inputs": {{"length": 50}}}},
-                {{"id": "MASimple@tv-basicstudies", "inputs": {{"length": 100}}}},
-                {{"id": "MASimple@tv-basicstudies", "inputs": {{"length": 200}}}}
-              ],
-              "container_id": "tradingview_{symbol.lower()}"
-            }});
-          </script>
-        </div>
-        """
-        with st.expander(f"📈 Chart anzeigen ({symbol})", expanded=False):
-            components.html(chart_html, height=400)
+            st.markdown(f"### 🟦 {symbol} — {company_name}")
 
-        # OptionCharts Link
-        oc_url = f"https://optioncharts.io/options/{symbol}/option-chain?option_type=put&expiration_dates={expiry_input}:m&view=list&strike_range=all"
-        
-        st.write(f"**Aktueller Kurs:** ${current_price:.2f}  |  **Marktkapitalisierung:** {market_cap_str}")
-        st.markdown(f"""
-            <a href="{oc_url}" target="_blank" style="
-                display: inline-block; padding: 6px 12px; color: white; background-color: #262730;
-                border: 1px solid #4e4f55; border-radius: 5px; text-decoration: none;
-                font-size: 0.9em; margin-bottom: 10px;">
-                🔗 OptionCharts.io Analyse für {symbol} öffnen
-            </a>
-        """, unsafe_allow_html=True)
+            # === TradingView Chart ===
+            chart_html = f"""
+            <div class="tradingview-widget-container" style="height:380px;width:100%;margin-bottom:10px;">
+              <div id="tradingview_{symbol.lower()}"></div>
+              <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+              <script type="text/javascript">
+                new TradingView.widget({{
+                  "width": "100%",
+                  "height": "380",
+                  "symbol": "{symbol}",
+                  "interval": "D",
+                  "timezone": "Etc/UTC",
+                  "theme": "dark",
+                  "style": "1",
+                  "locale": "en",
+                  "hide_side_toolbar": true,
+                  "allow_symbol_change": false,
+                  "save_image": false,
+                  "studies": [
+                    {{"id": "MASimple@tv-basicstudies", "inputs": {{"length": 50}}}},
+                    {{"id": "MASimple@tv-basicstudies", "inputs": {{"length": 100}}}},
+                    {{"id": "MASimple@tv-basicstudies", "inputs": {{"length": 200}}}}
+                  ],
+                  "container_id": "tradingview_{symbol.lower()}"
+                }});
+              </script>
+            </div>
+            """
+            with st.expander(f"📈 Chart anzeigen ({symbol})", expanded=True): # Chart ist im Tab jetzt standardmäßig offen
+                components.html(chart_html, height=400)
 
-        # === Interaktive Tabelle (Checkbox) ===
-        display_cols = ["Favorit", "strike", "bid", "ask", "volume", "Rendite_%_p.a.", "Sicherheitsabstand_%"]
-        
-        edited_df = st.data_editor(
-            df_sym[display_cols],
-            column_config={
-                "Favorit": st.column_config.CheckboxColumn("⭐ Auswahl", default=False),
-                "strike": st.column_config.NumberColumn("Strike ($)", format="%.2f"),
-                "bid": st.column_config.NumberColumn("Bid", format="%.2f"),
-                "ask": st.column_config.NumberColumn("Ask", format="%.2f"),
-                "Rendite_%_p.a.": st.column_config.NumberColumn("Rendite p.a. (%)", format="%.1f"),
-                "Sicherheitsabstand_%": st.column_config.NumberColumn("Sicherheit (%)", format="%.1f"),
-            },
-            disabled=["strike", "bid", "ask", "volume", "Rendite_%_p.a.", "Sicherheitsabstand_%"],
-            hide_index=True,
-            key=f"editor_{symbol}",
-            use_container_width=True
-        )
+            # OptionCharts Link
+            oc_url = f"https://optioncharts.io/options/{symbol}/option-chain?option_type=put&expiration_dates={expiry_input}:m&view=list&strike_range=all"
+            
+            st.write(f"**Aktueller Kurs:** ${current_price:.2f}  |  **Marktkapitalisierung:** {market_cap_str}")
+            st.markdown(f"""
+                <a href="{oc_url}" target="_blank" style="
+                    display: inline-block; padding: 6px 12px; color: white; background-color: #262730;
+                    border: 1px solid #4e4f55; border-radius: 5px; text-decoration: none;
+                    font-size: 0.9em; margin-bottom: 10px;">
+                    🔗 OptionCharts.io Analyse für {symbol} öffnen
+                </a>
+            """, unsafe_allow_html=True)
 
-        # Änderungen in den Datensatz zurückschreiben
-        df_sym['Favorit'] = edited_df['Favorit']
-        updated_dfs.append(df_sym)
+            # === Interaktive Tabelle (Checkbox) ===
+            display_cols = ["Favorit", "strike", "bid", "ask", "volume", "Rendite_%_p.a.", "Sicherheitsabstand_%"]
+            
+            edited_df = st.data_editor(
+                df_sym[display_cols],
+                column_config={
+                    "Favorit": st.column_config.CheckboxColumn("⭐ Auswahl", default=False),
+                    "strike": st.column_config.NumberColumn("Strike ($)", format="%.2f"),
+                    "bid": st.column_config.NumberColumn("Bid", format="%.2f"),
+                    "ask": st.column_config.NumberColumn("Ask", format="%.2f"),
+                    "Rendite_%_p.a.": st.column_config.NumberColumn("Rendite p.a. (%)", format="%.1f"),
+                    "Sicherheitsabstand_%": st.column_config.NumberColumn("Sicherheit (%)", format="%.1f"),
+                },
+                disabled=["strike", "bid", "ask", "volume", "Rendite_%_p.a.", "Sicherheitsabstand_%"],
+                hide_index=True,
+                key=f"editor_{symbol}",
+                use_container_width=True
+            )
+
+            # Änderungen in den Datensatz zurückschreiben
+            df_sym['Favorit'] = edited_df['Favorit']
+            updated_dfs.append(df_sym)
 
     # Master-Daten aktualisieren
     st.session_state.options_data = pd.concat(updated_dfs, ignore_index=True)
@@ -318,4 +319,4 @@ if st.session_state.options_data is not None and not st.session_state.options_da
             type="primary"
         )
     else:
-        st.info("Noch keine Optionen ausgewählt. Setze bei den Ergebnissen oben einen Haken, um sie hier zu sammeln.")
+        st.info("Noch keine Optionen ausgewählt. Hake in den Tabs oben deine Favoriten an, um sie hier zu sammeln.")
