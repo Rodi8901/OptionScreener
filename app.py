@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import os, time
-from datetime import datetime
+from datetime import datetime, timedelta, date
 import streamlit.components.v1 as components
 
 # === Seiteneinstellungen ===
@@ -104,36 +104,24 @@ else:
 # === Laufzeit-Auswahl ===
 st.subheader("2️⃣ Laufzeit")
 
-expiry_input = None
-available_expirations = []
+def get_upcoming_fridays(weeks=104):
+    """Generiert eine Liste aller kommenden Freitage ab heute (für die nächsten ~2 Jahre)."""
+    today = date.today()
+    days_ahead = 4 - today.weekday() # 4 steht für Freitag (0=Montag)
+    if days_ahead < 0:
+        days_ahead += 7 # Wenn heute z.B. Samstag ist, springe zum nächsten Freitag
+    next_friday = today + timedelta(days=days_ahead)
+    
+    return [(next_friday + timedelta(days=7 * i)).strftime("%Y-%m-%d") for i in range(weeks)]
 
 if tickers_list:
-    first_symbol = tickers_list[0]
-    try:
-        sample_ticker = yf.Ticker(first_symbol)
-        available_expirations = sample_ticker.options
-
-        if available_expirations and len(available_expirations) > 0:
-            st.success(f"📅 Verfügbare Laufzeiten für {first_symbol}:")
-            expiry_input = st.selectbox(
-                "Wähle eine Optionslaufzeit:",
-                available_expirations,
-                index=min(2, len(available_expirations) - 1)
-            )
-        else:
-            st.warning(f"Keine Optionsdaten für {first_symbol} gefunden.")
-            expiry_input = st.text_input(
-                "Kein Datum gefunden – gib das Ablaufdatum manuell ein (YYYY-MM-DD):",
-                placeholder="2025-12-19"
-            )
-
-    except Exception as e:
-        st.warning(f"Konnte keine Laufzeiten abrufen ({first_symbol}): {e}")
-        expiry_input = st.text_input(
-            "Fehler beim Abruf – gib das Ablaufdatum manuell ein (YYYY-MM-DD):",
-            placeholder="2025-12-19"
-        )
-
+    available_expirations = get_upcoming_fridays(104) # Holt die nächsten 104 Freitage
+    
+    expiry_input = st.selectbox(
+        "Wähle eine Optionslaufzeit (immer Freitags):",
+        available_expirations,
+        index=0 # Standard: Nächster verfügbarer Freitag
+    )
 else:
     st.info("Bitte gib zuerst deine Ticker ein, um verfügbare Laufzeiten zu laden.")
     expiry_input = None
@@ -174,7 +162,7 @@ if tickers_list and expiry_input:
                 continue
 
             if expiry_input not in ticker.options:
-                continue
+                continue # Überspringt diese Aktie lautlos, falls sie an diesem Freitag keine Optionen anbietet
 
             chain = ticker.option_chain(expiry_input)
             puts = chain.puts.copy()
@@ -185,9 +173,13 @@ if tickers_list and expiry_input:
             puts["Sicherheitsabstand_%"] = (current_price - puts["strike"]) / current_price * 100
             puts["Prämie_$"] = puts["bid"] * 100
             puts["Resttage"] = (expiry_date - datetime.now().date()).days
+            
+            # Fallback, falls Resttage = 0 sind (Verfallstag selbst)
+            resttage_calc = puts["Resttage"].replace(0, 1) 
+            
             puts["Rendite_%_p.a."] = (
                 (puts["Prämie_$"] / (puts["strike"] * 100)) *
-                (365 / puts["Resttage"]) * 100
+                (365 / resttage_calc) * 100
             )
 
             # --- Filter & Sortierung ---
@@ -203,7 +195,8 @@ if tickers_list and expiry_input:
             st.markdown(f"<hr style='border:3px solid #444;margin:20px 0;'>", unsafe_allow_html=True)
             st.markdown(f"### 🟦 {symbol} — {company_name}")
 
-            # === TradingView Chart ===
+            # === TradingView Chart mit SMAs ===
+            # WICHTIG: Die doppelten {{ }} sind notwendig, da wir uns in einem f-String befinden!
             chart_html = f"""
             <div class="tradingview-widget-container" style="height:380px;width:100%;margin-bottom:10px;">
               <div id="tradingview_{symbol.lower()}"></div>
@@ -221,6 +214,11 @@ if tickers_list and expiry_input:
                   "hide_side_toolbar": true,
                   "allow_symbol_change": false,
                   "save_image": false,
+                  "studies": [
+                    {{"id": "MASimple@tv-basicstudies", "inputs": {{"length": 50}}}},
+                    {{"id": "MASimple@tv-basicstudies", "inputs": {{"length": 100}}}},
+                    {{"id": "MASimple@tv-basicstudies", "inputs": {{"length": 200}}}}
+                  ],
                   "container_id": "tradingview_{symbol.lower()}"
                 }});
               </script>
@@ -229,9 +227,7 @@ if tickers_list and expiry_input:
             with st.expander(f"📈 Chart anzeigen ({symbol})", expanded=False):
                 components.html(chart_html, height=400)
 
-            # --- NEU: Dynamischer Link zu OptionCharts.io ---
-            # URL Aufbau: https://optioncharts.io/options/INTC/option-chain?option_type=put&expiration_dates=2026-01-23:m&view=list&strike_range=all
-            # Hinweis: Wir nutzen das Datum ohne das ":m" Suffix, da dies universeller für alle Laufzeiten funktioniert.
+            # --- Dynamischer Link zu OptionCharts.io ---
             oc_url = f"https://optioncharts.io/options/{symbol}/option-chain?option_type=put&expiration_dates={expiry_input}:m&view=list&strike_range=all"
 
             # Anzeige Kurs & Market Cap
