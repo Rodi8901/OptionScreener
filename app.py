@@ -165,6 +165,8 @@ if analyze_btn and tickers_list and expiry_input:
                 # Kennzahlen berechnen
                 puts["Sicherheitsabstand_%"] = (current_price - puts["strike"]) / current_price * 100
                 puts["Prämie_$"] = puts["bid"] * 100
+                puts["IV_%"] = puts["impliedVolatility"] * 100  # <--- NEU: IV berechnen
+                
                 resttage = (expiry_date - datetime.now().date()).days
                 resttage_calc = resttage if resttage > 0 else 1
 
@@ -255,12 +257,12 @@ if st.session_state.options_data is not None and not st.session_state.options_da
                 display: inline-block; padding: 6px 12px; color: white; background-color: #262730;
                 border: 1px solid #4e4f55; border-radius: 5px; text-decoration: none;
                 font-size: 0.9em; margin-bottom: 10px;">
-                🔗 OptionCharts.io Analyse für {symbol} öffnen
+                🔗 OptionCharts.io Analyse für {symbol} öffnen (für IV-Rank prüfen)
             </a>
         """, unsafe_allow_html=True)
 
         # === Interaktive Tabelle (Checkbox) ===
-        display_cols = ["Favorit", "strike", "bid", "ask", "volume", "Rendite_%_p.a.", "Sicherheitsabstand_%"]
+        display_cols = ["Favorit", "strike", "bid", "ask", "volume", "IV_%", "Rendite_%_p.a.", "Sicherheitsabstand_%"] # <--- NEU: IV_% hinzugefügt
         
         edited_df = st.data_editor(
             df_sym[display_cols],
@@ -269,10 +271,11 @@ if st.session_state.options_data is not None and not st.session_state.options_da
                 "strike": st.column_config.NumberColumn("Strike ($)", format="%.2f"),
                 "bid": st.column_config.NumberColumn("Bid", format="%.2f"),
                 "ask": st.column_config.NumberColumn("Ask", format="%.2f"),
+                "IV_%": st.column_config.NumberColumn("IV (%)", format="%.1f"), # <--- NEU: IV Konfiguration
                 "Rendite_%_p.a.": st.column_config.NumberColumn("Rendite p.a. (%)", format="%.1f"),
                 "Sicherheitsabstand_%": st.column_config.NumberColumn("Sicherheit (%)", format="%.1f"),
             },
-            disabled=["strike", "bid", "ask", "volume", "Rendite_%_p.a.", "Sicherheitsabstand_%"],
+            disabled=["strike", "bid", "ask", "volume", "IV_%", "Rendite_%_p.a.", "Sicherheitsabstand_%"],
             hide_index=True,
             key=f"editor_{symbol}",
             use_container_width=True
@@ -294,7 +297,7 @@ if st.session_state.options_data is not None and not st.session_state.options_da
     favs = st.session_state.options_data[st.session_state.options_data['Favorit'] == True].copy()
 
     if not favs.empty:
-        fav_display = favs[["Symbol", "Company", "strike", "bid", "ask", "Rendite_%_p.a.", "Sicherheitsabstand_%"]]
+        fav_display = favs[["Symbol", "Company", "strike", "bid", "ask", "IV_%", "Rendite_%_p.a.", "Sicherheitsabstand_%"]] # <--- NEU: IV_% hinzugefügt
         
         st.dataframe(
             fav_display,
@@ -304,6 +307,7 @@ if st.session_state.options_data is not None and not st.session_state.options_da
                 "strike": st.column_config.NumberColumn("Strike ($)", format="%.2f"),
                 "bid": st.column_config.NumberColumn("Bid ($)", format="%.2f"),
                 "ask": st.column_config.NumberColumn("Ask ($)", format="%.2f"),
+                "IV_%": st.column_config.NumberColumn("IV (%)", format="%.1f"), # <--- NEU: IV Konfiguration
                 "Rendite_%_p.a.": st.column_config.NumberColumn("Rendite p.a. (%)", format="%.2f"),
                 "Sicherheitsabstand_%": st.column_config.NumberColumn("Sicherheit (%)", format="%.2f"),
             }
