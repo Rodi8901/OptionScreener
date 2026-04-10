@@ -21,7 +21,6 @@ def get_robust_earnings_date(ticker_obj, info_dict):
     """Sucht extrem aggressiv über 3 verschiedene Wege nach dem Earnings-Datum."""
     today = date.today()
     
-    # 1. Versuch: Versteckter Unix-Timestamp im info-Dictionary (Schnell & zuverlässig)
     for key in ['earningsTimestamp', 'earningsTimestampStart']:
         if key in info_dict and info_dict[key]:
             try:
@@ -31,7 +30,6 @@ def get_robust_earnings_date(ticker_obj, info_dict):
             except Exception:
                 continue
 
-    # 2. Versuch: Calendar Dictionary (oft von Yahoo kaputt gemacht)
     try:
         cal = ticker_obj.calendar
         if isinstance(cal, dict) and 'Earnings Date' in cal:
@@ -200,9 +198,6 @@ if analyze_btn and tickers_list and expiry_input:
                 sector = info.get("sector", "N/A")
                 industry = info.get("industry", "N/A")
                 
-                # -------------------------------------------------------------
-                # 🛠️ BUGFIX: 100% Manuelle & Sichere Dividenden-Berechnung
-                # -------------------------------------------------------------
                 div_rate = info.get("dividendRate") or info.get("trailingAnnualDividendRate") or 0
                 if div_rate > 0 and current_price and current_price > 0:
                     div_yield_pct = (div_rate / current_price) * 100
@@ -210,16 +205,10 @@ if analyze_btn and tickers_list and expiry_input:
                     div_yield_pct = 0.0
                 div_yield_str = f"{div_yield_pct:.2f}%"
 
-                # -------------------------------------------------------------
-                # 🛠️ BUGFIX: Robuster Earnings-Datum Parser
-                # -------------------------------------------------------------
                 earnings_date_val = get_robust_earnings_date(ticker, info)
-                
                 if earnings_date_val:
-                    earnings_gap_val = (earnings_date_val - expiry_date).days
                     earnings_date_str = earnings_date_val.strftime("%Y-%m-%d")
                 else:
-                    earnings_gap_val = "N/A"
                     earnings_date_str = "Unbekannt"
 
                 if not current_price or expiry_input not in ticker.options:
@@ -254,7 +243,7 @@ if analyze_btn and tickers_list and expiry_input:
                     filtered.insert(6, "Industry", industry)
                     filtered.insert(7, "DivYield", div_yield_str)
                     filtered.insert(8, "EarningsDate", earnings_date_str)
-                    filtered.insert(9, "EarningsGap", earnings_gap_val)
+                    # EarningsGap entfernt
                     
                     all_filtered_options.append(filtered.sort_values("strike", ascending=True))
 
@@ -287,26 +276,15 @@ if st.session_state.options_data is not None and not st.session_state.options_da
         industry = df_sym['Industry'].iloc[0]
         div_yield = df_sym['DivYield'].iloc[0]
         earnings_date_str = df_sym['EarningsDate'].iloc[0]
-        earnings_gap = df_sym['EarningsGap'].iloc[0]
 
         st.markdown(f"<hr style='border:3px solid #444;margin:20px 0;'>", unsafe_allow_html=True)
         st.markdown(f"### 🟦 {symbol} — {company_name}")
 
-        if isinstance(earnings_gap, (int, float)):
-            if earnings_gap <= 0:
-                gap_text_color = "#b91c1c" 
-                gap_bg_color = "#fee2e2"   
-            else:
-                gap_text_color = "#15803d" 
-                gap_bg_color = "#dcfce7"   
-            gap_text = f"{int(earnings_gap)} Tage"
-        else:
-            gap_text_color = "#4b5563" 
-            gap_bg_color = "#f3f4f6"   
-            gap_text = "N/A"
+        oc_url = f"https://optioncharts.io/options/{symbol}/option-chain?option_type=put&expiration_dates={expiry_input}:m&view=list&strike_range=all"
 
+        # --- HTML Info-Tabelle KOMPAKT inkl. OptionCharts Button ---
         info_html = f"""
-        <div style="display: flex; flex-wrap: wrap; gap: 10px; background-color: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #d1d5db; margin-bottom: 15px; font-size: 0.95em; text-align: center; color: #111827;">
+        <div style="display: flex; flex-wrap: wrap; gap: 10px; background-color: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #d1d5db; margin-bottom: 15px; font-size: 0.95em; text-align: center; color: #111827; align-items: center;">
             <div style="flex: 1; min-width: 100px;">
                 <span style="color: #6b7280; font-size: 0.85em;">Kurs</span><br>
                 <b>${current_price:.2f}</b>
@@ -327,9 +305,10 @@ if st.session_state.options_data is not None and not st.session_state.options_da
                 <span style="color: #6b7280; font-size: 0.85em;">Nächste Earnings</span><br>
                 <b>{earnings_date_str}</b>
             </div>
-            <div style="flex: 1; min-width: 120px; color: {gap_text_color}; background-color: {gap_bg_color}; padding: 5px; border-radius: 5px; border: 1px solid {gap_text_color};">
-                <span style="font-size: 0.85em; color: {gap_text_color};">Earnings Gap</span><br>
-                <b>{gap_text}</b>
+            <div style="flex: 1; min-width: 180px;">
+                <a href="{oc_url}" target="_blank" style="display: inline-block; padding: 8px 12px; color: white; background-color: #1f2937; border-radius: 5px; text-decoration: none; font-size: 0.85em; width: 100%; box-sizing: border-box; transition: 0.2s;">
+                    🔗 IV-Rank prüfen (OptionCharts)
+                </a>
             </div>
         </div>
         """
@@ -365,17 +344,6 @@ if st.session_state.options_data is not None and not st.session_state.options_da
         with st.expander(f"📈 Chart anzeigen ({symbol})", expanded=False):
             components.html(chart_html, height=400)
 
-        oc_url = f"https://optioncharts.io/options/{symbol}/option-chain?option_type=put&expiration_dates={expiry_input}:m&view=list&strike_range=all"
-        
-        st.markdown(f"""
-            <a href="{oc_url}" target="_blank" style="
-                display: inline-block; padding: 6px 12px; color: white; background-color: #262730;
-                border: 1px solid #4e4f55; border-radius: 5px; text-decoration: none;
-                font-size: 0.9em; margin-bottom: 10px;">
-                🔗 OptionCharts.io Analyse für {symbol} öffnen (für IV-Rank prüfen)
-            </a>
-        """, unsafe_allow_html=True)
-
         display_cols = ["Favorit", "strike", "bid", "ask", "volume", "IV_%", "Rendite_%_p.a.", "Sicherheitsabstand_%"] 
         
         edited_df = st.data_editor(
@@ -409,7 +377,8 @@ if st.session_state.options_data is not None and not st.session_state.options_da
     favs = st.session_state.options_data[st.session_state.options_data['Favorit'] == True].copy()
 
     if not favs.empty:
-        fav_display = favs[["Symbol", "Company", "strike", "bid", "ask", "IV_%", "Rendite_%_p.a.", "Sicherheitsabstand_%", "EarningsDate", "EarningsGap", "DivYield"]] 
+        # Watchlist ohne Earnings Gap
+        fav_display = favs[["Symbol", "Company", "strike", "bid", "ask", "IV_%", "Rendite_%_p.a.", "Sicherheitsabstand_%", "EarningsDate", "DivYield"]] 
         
         st.dataframe(
             fav_display,
@@ -423,7 +392,6 @@ if st.session_state.options_data is not None and not st.session_state.options_da
                 "Rendite_%_p.a.": st.column_config.NumberColumn("Rendite p.a. (%)", format="%.2f"),
                 "Sicherheitsabstand_%": st.column_config.NumberColumn("Sicherheit (%)", format="%.2f"),
                 "EarningsDate": st.column_config.TextColumn("Earnings am"),
-                "EarningsGap": st.column_config.TextColumn("Gap (Tage)"),
                 "DivYield": st.column_config.TextColumn("Dividende"),
             }
         )
