@@ -125,11 +125,14 @@ else:
 
 # === Filter-Einstellungen ===
 st.subheader("3️⃣ Filtereinstellungen")
-col1, col2 = st.columns(2)
+# NEU: Drei Spalten für den zusätzlichen Max-Rendite-Filter
+col1, col2, col3 = st.columns(3)
 with col1:
-    min_rendite = st.number_input("Min. Jahresrendite (%)", 0.0, 100.0, 10.0, step=0.5)
+    min_rendite = st.number_input("Min. Rendite p.a. (%)", 0.0, 500.0, 10.0, step=0.5)
 with col2:
-    min_sicherheit = st.number_input("Min. Sicherheitsabstand (%)", 0.0, 50.0, 5.0, step=0.5)
+    max_rendite = st.number_input("Max. Rendite p.a. (%)", 0.0, 500.0, 50.0, step=0.5)
+with col3:
+    min_sicherheit = st.number_input("Min. Sicherheitsabstand (%)", 0.0, 100.0, 5.0, step=0.5)
 
 st.write("") # Abstand
 analyze_btn = st.button("🚀 Optionen abrufen & filtern", type="primary", use_container_width=True)
@@ -140,6 +143,10 @@ if analyze_btn and tickers_list and expiry_input:
         expiry_date = datetime.strptime(expiry_input, "%Y-%m-%d").date()
     except ValueError:
         st.error("⚠️ Ungültiges Datumsformat.")
+        st.stop()
+
+    if min_rendite > max_rendite:
+        st.error("⚠️ Die minimale Rendite kann nicht größer sein als die maximale Rendite.")
         st.stop()
 
     all_filtered_options = []
@@ -155,14 +162,12 @@ if analyze_btn and tickers_list and expiry_input:
                 market_cap_raw = info.get("marketCap", 0)
                 market_cap_str = f"{market_cap_raw / 1e9:.2f} Mrd. USD" if market_cap_raw else "n/a"
 
-                # --- NEU: Erweiterte Fundamentaldaten ---
                 sector = info.get("sector", "N/A")
                 industry = info.get("industry", "N/A")
                 
                 div_yield_raw = info.get("dividendYield", info.get("trailingAnnualDividendYield", 0))
                 div_yield_str = f"{div_yield_raw * 100:.2f}%" if div_yield_raw else "0.00%"
 
-                # Earnings Datum abrufen
                 earnings_date_val = "N/A"
                 earnings_gap_val = "N/A"
                 
@@ -175,14 +180,12 @@ if analyze_btn and tickers_list and expiry_input:
                 except:
                     pass
                 
-                # Fallback Timestamp
                 if earnings_date_val == "N/A" and "earningsTimestamp" in info:
                     try:
                         earnings_date_val = datetime.fromtimestamp(info["earningsTimestamp"]).date()
                     except:
                         pass
                 
-                # Gap berechnen
                 if isinstance(earnings_date_val, date):
                     earnings_gap_val = (earnings_date_val - expiry_date).days
                     earnings_date_str = earnings_date_val.strftime("%Y-%m-%d")
@@ -196,7 +199,6 @@ if analyze_btn and tickers_list and expiry_input:
                 puts = chain.puts.copy()
                 puts = puts[["strike", "lastPrice", "bid", "ask", "volume", "impliedVolatility"]].fillna(0)
 
-                # Kennzahlen berechnen
                 puts["Sicherheitsabstand_%"] = (current_price - puts["strike"]) / current_price * 100
                 puts["Prämie_$"] = puts["bid"] * 100
                 puts["IV_%"] = puts["impliedVolatility"] * 100 
@@ -206,21 +208,19 @@ if analyze_btn and tickers_list and expiry_input:
 
                 puts["Rendite_%_p.a."] = ((puts["Prämie_$"] / (puts["strike"] * 100)) * (365 / resttage_calc) * 100)
 
-                # Filtern
+                # NEU: Filter-Logik um max_rendite erweitert
                 filtered = puts[
                     (puts["Sicherheitsabstand_%"] >= min_sicherheit) &
-                    (puts["Rendite_%_p.a."] >= min_rendite)
+                    (puts["Rendite_%_p.a."] >= min_rendite) &
+                    (puts["Rendite_%_p.a."] <= max_rendite)
                 ].copy()
 
                 if not filtered.empty:
-                    # Metadaten für die Gesamttabelle anhängen
                     filtered.insert(0, "Favorit", False)
                     filtered.insert(1, "Symbol", symbol)
                     filtered.insert(2, "Company", company_name)
                     filtered.insert(3, "Kurs", current_price)
                     filtered.insert(4, "MarketCap", market_cap_str)
-                    
-                    # NEU: Spalten einfügen
                     filtered.insert(5, "Sector", sector)
                     filtered.insert(6, "Industry", industry)
                     filtered.insert(7, "DivYield", div_yield_str)
@@ -232,7 +232,6 @@ if analyze_btn and tickers_list and expiry_input:
             except Exception as e:
                 st.warning(f"Fehler bei {symbol}: {e}")
 
-    # Ergebnisse im Session State speichern
     if all_filtered_options:
         st.session_state.options_data = pd.concat(all_filtered_options, ignore_index=True)
     else:
@@ -255,7 +254,6 @@ if st.session_state.options_data is not None and not st.session_state.options_da
         current_price = df_sym['Kurs'].iloc[0]
         market_cap_str = df_sym['MarketCap'].iloc[0]
         
-        # NEUE DATEN AUSLESEN
         sector = df_sym['Sector'].iloc[0]
         industry = df_sym['Industry'].iloc[0]
         div_yield = df_sym['DivYield'].iloc[0]
@@ -265,40 +263,45 @@ if st.session_state.options_data is not None and not st.session_state.options_da
         st.markdown(f"<hr style='border:3px solid #444;margin:20px 0;'>", unsafe_allow_html=True)
         st.markdown(f"### 🟦 {symbol} — {company_name}")
 
-        # --- Logik für Earnings Gap Anzeige ---
+        # --- NEU: Logik für farbliche Darstellung (für hellen Hintergrund) ---
         if isinstance(earnings_gap, (int, float)):
-            # Rot wenn Gap <= 0 (Earnings vor oder am Verfall), Grün wenn sicher
-            gap_color = "#ff4b4b" if earnings_gap <= 0 else "#2ecc71"
+            if earnings_gap <= 0:
+                gap_text_color = "#b91c1c" # Dunkelrot für Schrift
+                gap_bg_color = "#fee2e2"   # Helles Pastellrot für Box
+            else:
+                gap_text_color = "#15803d" # Dunkelgrün für Schrift
+                gap_bg_color = "#dcfce7"   # Helles Pastellgrün für Box
             gap_text = f"{int(earnings_gap)} Tage"
         else:
-            gap_color = "#aaaaaa"
+            gap_text_color = "#4b5563" # Grau
+            gap_bg_color = "#f3f4f6"   # Hellgrau
             gap_text = "N/A"
 
-        # --- HTML Info-Tabelle (Flexbox) ---
+        # --- NEU: HTML Info-Tabelle im Light-Theme ---
         info_html = f"""
-        <div style="display: flex; flex-wrap: wrap; gap: 10px; background-color: #1e1e24; padding: 15px; border-radius: 8px; border: 1px solid #444; margin-bottom: 15px; font-size: 0.95em; text-align: center;">
+        <div style="display: flex; flex-wrap: wrap; gap: 10px; background-color: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #d1d5db; margin-bottom: 15px; font-size: 0.95em; text-align: center; color: #111827;">
             <div style="flex: 1; min-width: 100px;">
-                <span style="color: #bbb; font-size: 0.85em;">Kurs</span><br>
+                <span style="color: #6b7280; font-size: 0.85em;">Kurs</span><br>
                 <b>${current_price:.2f}</b>
             </div>
             <div style="flex: 1; min-width: 120px;">
-                <span style="color: #bbb; font-size: 0.85em;">Market Cap</span><br>
+                <span style="color: #6b7280; font-size: 0.85em;">Market Cap</span><br>
                 <b>{market_cap_str}</b>
             </div>
             <div style="flex: 1; min-width: 160px;">
-                <span style="color: #bbb; font-size: 0.85em;">Sektor / Branche</span><br>
-                <b>{sector}</b><br><span style="font-size: 0.8em; color: #888;">{industry}</span>
+                <span style="color: #6b7280; font-size: 0.85em;">Sektor / Branche</span><br>
+                <b>{sector}</b><br><span style="font-size: 0.8em; color: #4b5563;">{industry}</span>
             </div>
             <div style="flex: 1; min-width: 100px;">
-                <span style="color: #bbb; font-size: 0.85em;">Dividende</span><br>
+                <span style="color: #6b7280; font-size: 0.85em;">Dividende</span><br>
                 <b>{div_yield}</b>
             </div>
             <div style="flex: 1; min-width: 120px;">
-                <span style="color: #bbb; font-size: 0.85em;">Nächste Earnings</span><br>
+                <span style="color: #6b7280; font-size: 0.85em;">Nächste Earnings</span><br>
                 <b>{earnings_date_str}</b>
             </div>
-            <div style="flex: 1; min-width: 120px; color: {gap_color}; background-color: rgba(0,0,0,0.2); padding: 5px; border-radius: 5px;">
-                <span style="font-size: 0.85em; color: {gap_color};">Earnings Gap</span><br>
+            <div style="flex: 1; min-width: 120px; color: {gap_text_color}; background-color: {gap_bg_color}; padding: 5px; border-radius: 5px; border: 1px solid {gap_text_color};">
+                <span style="font-size: 0.85em; color: {gap_text_color};">Earnings Gap</span><br>
                 <b>{gap_text}</b>
             </div>
         </div>
@@ -384,7 +387,6 @@ if st.session_state.options_data is not None and not st.session_state.options_da
     favs = st.session_state.options_data[st.session_state.options_data['Favorit'] == True].copy()
 
     if not favs.empty:
-        # Erweiterte Watchlist Anzeige
         fav_display = favs[["Symbol", "Company", "strike", "bid", "ask", "IV_%", "Rendite_%_p.a.", "Sicherheitsabstand_%", "EarningsDate", "EarningsGap", "DivYield"]] 
         
         st.dataframe(
