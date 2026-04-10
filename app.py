@@ -125,7 +125,6 @@ else:
 
 # === Filter-Einstellungen ===
 st.subheader("3️⃣ Filtereinstellungen")
-# NEU: Drei Spalten für den zusätzlichen Max-Rendite-Filter
 col1, col2, col3 = st.columns(3)
 with col1:
     min_rendite = st.number_input("Min. Rendite p.a. (%)", 0.0, 500.0, 10.0, step=0.5)
@@ -168,29 +167,43 @@ if analyze_btn and tickers_list and expiry_input:
                 div_yield_raw = info.get("dividendYield", info.get("trailingAnnualDividendYield", 0))
                 div_yield_str = f"{div_yield_raw * 100:.2f}%" if div_yield_raw else "0.00%"
 
-                earnings_date_val = "N/A"
+                # -------------------------------------------------------------
+                # 🛠️ NEU: Robuster Earnings-Date Parser
+                # -------------------------------------------------------------
+                earnings_date_val = None
                 earnings_gap_val = "N/A"
+                earnings_date_str = "Unbekannt"
                 
                 try:
                     cal = ticker.calendar
                     if isinstance(cal, dict) and 'Earnings Date' in cal:
-                        d_list = cal['Earnings Date']
-                        if d_list:
-                            earnings_date_val = d_list[0].date() if hasattr(d_list[0], 'date') else d_list[0]
-                except:
+                        val = cal['Earnings Date']
+                        if isinstance(val, list) and len(val) > 0:
+                            # Wandelt z.B. pd.Timestamp, datetime oder Strings sauber um
+                            earnings_date_val = pd.to_datetime(val[0]).date()
+                        elif val:
+                            earnings_date_val = pd.to_datetime(val).date()
+                    elif isinstance(cal, pd.DataFrame) and not cal.empty and 'Earnings Date' in cal.index:
+                        val = cal.loc['Earnings Date'].iloc[0]
+                        if isinstance(val, list) and len(val) > 0:
+                            earnings_date_val = pd.to_datetime(val[0]).date()
+                        else:
+                            earnings_date_val = pd.to_datetime(val).date()
+                except Exception:
                     pass
                 
-                if earnings_date_val == "N/A" and "earningsTimestamp" in info:
+                # Fallback über Unix-Timestamp in Info
+                if earnings_date_val is None and "earningsTimestamp" in info:
                     try:
                         earnings_date_val = datetime.fromtimestamp(info["earningsTimestamp"]).date()
-                    except:
+                    except Exception:
                         pass
                 
-                if isinstance(earnings_date_val, date):
+                # Gap berechnen: Beide Werte sind jetzt garantiert saubere "date" Objekte
+                if earnings_date_val:
                     earnings_gap_val = (earnings_date_val - expiry_date).days
                     earnings_date_str = earnings_date_val.strftime("%Y-%m-%d")
-                else:
-                    earnings_date_str = "Unbekannt"
+                # -------------------------------------------------------------
 
                 if not current_price or expiry_input not in ticker.options:
                     continue
@@ -208,7 +221,6 @@ if analyze_btn and tickers_list and expiry_input:
 
                 puts["Rendite_%_p.a."] = ((puts["Prämie_$"] / (puts["strike"] * 100)) * (365 / resttage_calc) * 100)
 
-                # NEU: Filter-Logik um max_rendite erweitert
                 filtered = puts[
                     (puts["Sicherheitsabstand_%"] >= min_sicherheit) &
                     (puts["Rendite_%_p.a."] >= min_rendite) &
@@ -263,7 +275,7 @@ if st.session_state.options_data is not None and not st.session_state.options_da
         st.markdown(f"<hr style='border:3px solid #444;margin:20px 0;'>", unsafe_allow_html=True)
         st.markdown(f"### 🟦 {symbol} — {company_name}")
 
-        # --- NEU: Logik für farbliche Darstellung (für hellen Hintergrund) ---
+        # --- Logik für farbliche Darstellung (für hellen Hintergrund) ---
         if isinstance(earnings_gap, (int, float)):
             if earnings_gap <= 0:
                 gap_text_color = "#b91c1c" # Dunkelrot für Schrift
@@ -277,7 +289,7 @@ if st.session_state.options_data is not None and not st.session_state.options_da
             gap_bg_color = "#f3f4f6"   # Hellgrau
             gap_text = "N/A"
 
-        # --- NEU: HTML Info-Tabelle im Light-Theme ---
+        # --- HTML Info-Tabelle im Light-Theme ---
         info_html = f"""
         <div style="display: flex; flex-wrap: wrap; gap: 10px; background-color: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #d1d5db; margin-bottom: 15px; font-size: 0.95em; text-align: center; color: #111827;">
             <div style="flex: 1; min-width: 100px;">
