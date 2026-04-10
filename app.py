@@ -15,6 +15,48 @@ sp500_path = os.path.join(base_path, "sp500.csv")
 data_path = os.path.join(base_path, "sp500_data.csv")
 
 # ------------------------------------------------------------
+# 🛠️ HILFSFUNKTION: Robuster Earnings-Datum Parser
+# ------------------------------------------------------------
+def get_robust_earnings_date(ticker_obj):
+    """Sucht über 3 verschiedene Wege nach dem nächsten Earnings-Datum, um Yahoo-Bugs zu umgehen."""
+    today = date.today()
+    
+    # Versuch 1: Calendar Dictionary (Schnellster Weg)
+    try:
+        cal = ticker_obj.calendar
+        if isinstance(cal, dict) and 'Earnings Date' in cal:
+            dates = cal['Earnings Date']
+            future_dates = [pd.to_datetime(d).date() for d in dates if pd.to_datetime(d).date() >= today]
+            if future_dates:
+                return min(future_dates)
+            elif dates: 
+                return pd.to_datetime(dates[-1]).date()
+    except Exception:
+        pass
+
+    # Versuch 2: get_earnings_dates() Funktion (Gräbt tiefer in die Historie/Zukunft)
+    try:
+        ed = ticker_obj.get_earnings_dates(limit=10)
+        if ed is not None and not ed.empty:
+            future_dates = [d.date() for d in ed.index if d.date() >= today]
+            if future_dates:
+                return min(future_dates)
+    except Exception:
+        pass
+        
+    # Versuch 3: Versteckter Unix-Timestamp im info-Dictionary
+    try:
+        info = ticker_obj.info
+        if 'earningsTimestamp' in info:
+            dt = datetime.fromtimestamp(info['earningsTimestamp']).date()
+            if dt >= today:
+                return dt
+    except Exception:
+        pass
+        
+    return None
+
+# ------------------------------------------------------------
 # 🟦 1️⃣ Bereich: Fundamentaldaten-Downloader
 # ------------------------------------------------------------
 st.header("📥 S&P 500 Fundamentaldaten herunterladen")
@@ -164,46 +206,30 @@ if analyze_btn and tickers_list and expiry_input:
                 sector = info.get("sector", "N/A")
                 industry = info.get("industry", "N/A")
                 
-                div_yield_raw = info.get("dividendYield", info.get("trailingAnnualDividendYield", 0))
+                # --- BUGFIX: Dividenden-Anomalien abfangen ---
+                div_yield_raw = info.get("dividendYield")
+                if div_yield_raw is None:
+                    div_yield_raw = info.get("trailingAnnualDividendYield", 0)
+                
+                if div_yield_raw and div_yield_raw > 1:
+                    # Wenn Yahoo Quatsch liefert (>100%), berechnen wir es manuell
+                    div_rate = info.get("dividendRate", 0)
+                    if div_rate > 0 and current_price and current_price > 0:
+                        div_yield_raw = div_rate / current_price 
+                    else:
+                        div_yield_raw = div_yield_raw / 100 
+
                 div_yield_str = f"{div_yield_raw * 100:.2f}%" if div_yield_raw else "0.00%"
 
-                # -------------------------------------------------------------
-                # 🛠️ NEU: Robuster Earnings-Date Parser
-                # -------------------------------------------------------------
-                earnings_date_val = None
-                earnings_gap_val = "N/A"
-                earnings_date_str = "Unbekannt"
+                # --- BUGFIX: Zuverlässiges Earnings-Datum ---
+                earnings_date_val = get_robust_earnings_date(ticker)
                 
-                try:
-                    cal = ticker.calendar
-                    if isinstance(cal, dict) and 'Earnings Date' in cal:
-                        val = cal['Earnings Date']
-                        if isinstance(val, list) and len(val) > 0:
-                            # Wandelt z.B. pd.Timestamp, datetime oder Strings sauber um
-                            earnings_date_val = pd.to_datetime(val[0]).date()
-                        elif val:
-                            earnings_date_val = pd.to_datetime(val).date()
-                    elif isinstance(cal, pd.DataFrame) and not cal.empty and 'Earnings Date' in cal.index:
-                        val = cal.loc['Earnings Date'].iloc[0]
-                        if isinstance(val, list) and len(val) > 0:
-                            earnings_date_val = pd.to_datetime(val[0]).date()
-                        else:
-                            earnings_date_val = pd.to_datetime(val).date()
-                except Exception:
-                    pass
-                
-                # Fallback über Unix-Timestamp in Info
-                if earnings_date_val is None and "earningsTimestamp" in info:
-                    try:
-                        earnings_date_val = datetime.fromtimestamp(info["earningsTimestamp"]).date()
-                    except Exception:
-                        pass
-                
-                # Gap berechnen: Beide Werte sind jetzt garantiert saubere "date" Objekte
                 if earnings_date_val:
                     earnings_gap_val = (earnings_date_val - expiry_date).days
                     earnings_date_str = earnings_date_val.strftime("%Y-%m-%d")
-                # -------------------------------------------------------------
+                else:
+                    earnings_gap_val = "N/A"
+                    earnings_date_str = "Unbekannt"
 
                 if not current_price or expiry_input not in ticker.options:
                     continue
@@ -275,7 +301,6 @@ if st.session_state.options_data is not None and not st.session_state.options_da
         st.markdown(f"<hr style='border:3px solid #444;margin:20px 0;'>", unsafe_allow_html=True)
         st.markdown(f"### 🟦 {symbol} — {company_name}")
 
-        # --- Logik für farbliche Darstellung (für hellen Hintergrund) ---
         if isinstance(earnings_gap, (int, float)):
             if earnings_gap <= 0:
                 gap_text_color = "#b91c1c" # Dunkelrot für Schrift
@@ -289,7 +314,6 @@ if st.session_state.options_data is not None and not st.session_state.options_da
             gap_bg_color = "#f3f4f6"   # Hellgrau
             gap_text = "N/A"
 
-        # --- HTML Info-Tabelle im Light-Theme ---
         info_html = f"""
         <div style="display: flex; flex-wrap: wrap; gap: 10px; background-color: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #d1d5db; margin-bottom: 15px; font-size: 0.95em; text-align: center; color: #111827;">
             <div style="flex: 1; min-width: 100px;">
@@ -320,7 +344,6 @@ if st.session_state.options_data is not None and not st.session_state.options_da
         """
         st.markdown(info_html, unsafe_allow_html=True)
 
-        # === TradingView Chart ===
         chart_html = f"""
         <div class="tradingview-widget-container" style="height:380px;width:100%;margin-bottom:10px;">
           <div id="tradingview_{symbol.lower()}"></div>
@@ -351,7 +374,6 @@ if st.session_state.options_data is not None and not st.session_state.options_da
         with st.expander(f"📈 Chart anzeigen ({symbol})", expanded=False):
             components.html(chart_html, height=400)
 
-        # OptionCharts Link
         oc_url = f"https://optioncharts.io/options/{symbol}/option-chain?option_type=put&expiration_dates={expiry_input}:m&view=list&strike_range=all"
         
         st.markdown(f"""
@@ -363,7 +385,6 @@ if st.session_state.options_data is not None and not st.session_state.options_da
             </a>
         """, unsafe_allow_html=True)
 
-        # === Interaktive Tabelle (Checkbox) ===
         display_cols = ["Favorit", "strike", "bid", "ask", "volume", "IV_%", "Rendite_%_p.a.", "Sicherheitsabstand_%"] 
         
         edited_df = st.data_editor(
@@ -383,11 +404,9 @@ if st.session_state.options_data is not None and not st.session_state.options_da
             use_container_width=True
         )
 
-        # Änderungen in den Datensatz zurückschreiben
         df_sym['Favorit'] = edited_df['Favorit']
         updated_dfs.append(df_sym)
 
-    # Master-Daten aktualisieren
     st.session_state.options_data = pd.concat(updated_dfs, ignore_index=True)
 
     # ------------------------------------------------------------
