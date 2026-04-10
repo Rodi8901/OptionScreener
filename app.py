@@ -17,40 +17,35 @@ data_path = os.path.join(base_path, "sp500_data.csv")
 # ------------------------------------------------------------
 # 🛠️ HILFSFUNKTION: Robuster Earnings-Datum Parser
 # ------------------------------------------------------------
-def get_robust_earnings_date(ticker_obj):
-    """Sucht über 3 verschiedene Wege nach dem nächsten Earnings-Datum, um Yahoo-Bugs zu umgehen."""
+def get_robust_earnings_date(ticker_obj, info_dict):
+    """Sucht extrem aggressiv über 3 verschiedene Wege nach dem Earnings-Datum."""
     today = date.today()
     
-    # Versuch 1: Calendar Dictionary (Schnellster Weg)
+    # 1. Versuch: Versteckter Unix-Timestamp im info-Dictionary (Schnell & zuverlässig)
+    for key in ['earningsTimestamp', 'earningsTimestampStart']:
+        if key in info_dict and info_dict[key]:
+            try:
+                ts = int(info_dict[key])
+                dt = datetime.fromtimestamp(ts).date()
+                return dt
+            except Exception:
+                continue
+
+    # 2. Versuch: Calendar Dictionary (oft von Yahoo kaputt gemacht)
     try:
         cal = ticker_obj.calendar
         if isinstance(cal, dict) and 'Earnings Date' in cal:
-            dates = cal['Earnings Date']
-            future_dates = [pd.to_datetime(d).date() for d in dates if pd.to_datetime(d).date() >= today]
-            if future_dates:
-                return min(future_dates)
-            elif dates: 
-                return pd.to_datetime(dates[-1]).date()
-    except Exception:
-        pass
-
-    # Versuch 2: get_earnings_dates() Funktion (Gräbt tiefer in die Historie/Zukunft)
-    try:
-        ed = ticker_obj.get_earnings_dates(limit=10)
-        if ed is not None and not ed.empty:
-            future_dates = [d.date() for d in ed.index if d.date() >= today]
-            if future_dates:
-                return min(future_dates)
-    except Exception:
-        pass
-        
-    # Versuch 3: Versteckter Unix-Timestamp im info-Dictionary
-    try:
-        info = ticker_obj.info
-        if 'earningsTimestamp' in info:
-            dt = datetime.fromtimestamp(info['earningsTimestamp']).date()
-            if dt >= today:
-                return dt
+            val = cal['Earnings Date']
+            if isinstance(val, list) and len(val) > 0:
+                return pd.to_datetime(val[0]).date()
+            elif val:
+                return pd.to_datetime(val).date()
+        elif isinstance(cal, pd.DataFrame) and not cal.empty and 'Earnings Date' in cal.index:
+            val = cal.loc['Earnings Date'].iloc[0]
+            if isinstance(val, list) and len(val) > 0:
+                return pd.to_datetime(val[0]).date()
+            else:
+                return pd.to_datetime(val).date()
     except Exception:
         pass
         
@@ -132,7 +127,6 @@ st.markdown("---")
 # ------------------------------------------------------------
 st.header("📊 Optionsanalyse für ausgewählte Aktien")
 
-# Initialisiere Session State für die Ergebnisse
 if 'options_data' not in st.session_state:
     st.session_state.options_data = None
 
@@ -175,10 +169,10 @@ with col2:
 with col3:
     min_sicherheit = st.number_input("Min. Sicherheitsabstand (%)", 0.0, 100.0, 5.0, step=0.5)
 
-st.write("") # Abstand
+st.write("") 
 analyze_btn = st.button("🚀 Optionen abrufen & filtern", type="primary", use_container_width=True)
 
-# === Analyse durchführen (Nur bei Button-Klick) ===
+# === Analyse durchführen ===
 if analyze_btn and tickers_list and expiry_input:
     try:
         expiry_date = datetime.strptime(expiry_input, "%Y-%m-%d").date()
@@ -206,23 +200,20 @@ if analyze_btn and tickers_list and expiry_input:
                 sector = info.get("sector", "N/A")
                 industry = info.get("industry", "N/A")
                 
-                # --- BUGFIX: Dividenden-Anomalien abfangen ---
-                div_yield_raw = info.get("dividendYield")
-                if div_yield_raw is None:
-                    div_yield_raw = info.get("trailingAnnualDividendYield", 0)
-                
-                if div_yield_raw and div_yield_raw > 1:
-                    # Wenn Yahoo Quatsch liefert (>100%), berechnen wir es manuell
-                    div_rate = info.get("dividendRate", 0)
-                    if div_rate > 0 and current_price and current_price > 0:
-                        div_yield_raw = div_rate / current_price 
-                    else:
-                        div_yield_raw = div_yield_raw / 100 
+                # -------------------------------------------------------------
+                # 🛠️ BUGFIX: 100% Manuelle & Sichere Dividenden-Berechnung
+                # -------------------------------------------------------------
+                div_rate = info.get("dividendRate") or info.get("trailingAnnualDividendRate") or 0
+                if div_rate > 0 and current_price and current_price > 0:
+                    div_yield_pct = (div_rate / current_price) * 100
+                else:
+                    div_yield_pct = 0.0
+                div_yield_str = f"{div_yield_pct:.2f}%"
 
-                div_yield_str = f"{div_yield_raw * 100:.2f}%" if div_yield_raw else "0.00%"
-
-                # --- BUGFIX: Zuverlässiges Earnings-Datum ---
-                earnings_date_val = get_robust_earnings_date(ticker)
+                # -------------------------------------------------------------
+                # 🛠️ BUGFIX: Robuster Earnings-Datum Parser
+                # -------------------------------------------------------------
+                earnings_date_val = get_robust_earnings_date(ticker, info)
                 
                 if earnings_date_val:
                     earnings_gap_val = (earnings_date_val - expiry_date).days
@@ -303,15 +294,15 @@ if st.session_state.options_data is not None and not st.session_state.options_da
 
         if isinstance(earnings_gap, (int, float)):
             if earnings_gap <= 0:
-                gap_text_color = "#b91c1c" # Dunkelrot für Schrift
-                gap_bg_color = "#fee2e2"   # Helles Pastellrot für Box
+                gap_text_color = "#b91c1c" 
+                gap_bg_color = "#fee2e2"   
             else:
-                gap_text_color = "#15803d" # Dunkelgrün für Schrift
-                gap_bg_color = "#dcfce7"   # Helles Pastellgrün für Box
+                gap_text_color = "#15803d" 
+                gap_bg_color = "#dcfce7"   
             gap_text = f"{int(earnings_gap)} Tage"
         else:
-            gap_text_color = "#4b5563" # Grau
-            gap_bg_color = "#f3f4f6"   # Hellgrau
+            gap_text_color = "#4b5563" 
+            gap_bg_color = "#f3f4f6"   
             gap_text = "N/A"
 
         info_html = f"""
