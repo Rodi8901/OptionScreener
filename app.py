@@ -161,11 +161,11 @@ else:
 st.subheader("3️⃣ Filtereinstellungen")
 col1, col2, col3 = st.columns(3)
 with col1:
-    min_rendite = st.number_input("Min. Rendite p.a. (%)", 0.0, 500.0, 10.0, step=0.5)
+    min_rendite = st.number_input("Min. Rendite p.a. (%)", 0.0, 500.0, 12.0, step=0.5)
 with col2:
-    max_rendite = st.number_input("Max. Rendite p.a. (%)", 0.0, 500.0, 50.0, step=0.5)
+    max_rendite = st.number_input("Max. Rendite p.a. (%)", 0.0, 500.0, 40.0, step=0.5)
 with col3:
-    min_sicherheit = st.number_input("Min. Sicherheitsabstand (%)", 0.0, 100.0, 5.0, step=0.5)
+    min_sicherheit = st.number_input("Min. Sicherheitsabstand (%)", 0.0, 100.0, 7.0, step=0.5)
 
 st.write("") 
 analyze_btn = st.button("🚀 Optionen abrufen & filtern", type="primary", use_container_width=True)
