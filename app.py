@@ -377,9 +377,10 @@ if st.session_state.options_data is not None and not st.session_state.options_da
 
         display_cols = ["Favorit", "strike", "bid", "ask", "volume", "IV_%", "Rendite_%_p.a.", "Sicherheitsabstand_%", "Delta"] 
         
+        # Hier wird die Klammer ( geöffnet
         edited_df = st.data_editor(
             df_sym[display_cols],
-            column_config={
+            column_config={ # Hier wird die geschweifte Klammer { geöffnet
                 "Favorit": st.column_config.CheckboxColumn("⭐ Auswahl", default=False),
                 "strike": st.column_config.NumberColumn("Strike ($)", format="%.2f"),
                 "bid": st.column_config.NumberColumn("Bid", format="%.2f"),
@@ -388,12 +389,12 @@ if st.session_state.options_data is not None and not st.session_state.options_da
                 "Rendite_%_p.a.": st.column_config.NumberColumn("Rendite p.a. (%)", format="%.1f"),
                 "Sicherheitsabstand_%": st.column_config.NumberColumn("Sicherheit (%)", format="%.1f"),
                 "Delta": st.column_config.NumberColumn("Delta", format="%.2f", step=0.01),
-            },
+            }, # Hier wird die geschweifte Klammer { sauber geschlossen
             disabled=["strike", "bid", "ask", "volume", "IV_%", "Rendite_%_p.a.", "Sicherheitsabstand_%"],
             hide_index=True,
             key=f"editor_{symbol}",
             use_container_width=True
-        )
+        ) # Hier wird die runde Klammer ) von st.data_editor geschlossen
 
         df_sym['Favorit'] = edited_df['Favorit']
         df_sym['Delta'] = edited_df['Delta'] 
