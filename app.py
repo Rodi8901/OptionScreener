@@ -14,6 +14,16 @@ base_path = os.path.dirname(__file__)
 sp500_path = os.path.join(base_path, "sp500.csv")
 data_path = os.path.join(base_path, "sp500_data.csv")
 
+# === persistenten Speicher für manuelle Eingaben initialisieren ===
+if 'raw_options_data' not in st.session_state:
+    st.session_state.raw_options_data = None
+if 'storage_favoriten' not in st.session_state:
+    st.session_state.storage_favoriten = {}
+if 'storage_delta' not in st.session_state:
+    st.session_state.storage_delta = {}
+if 'storage_charts' not in st.session_state:
+    st.session_state.storage_charts = {}
+
 # ------------------------------------------------------------
 # 🛠️ HILFSFUNKTION: Robuster Earnings-Datum Parser
 # ------------------------------------------------------------
@@ -125,9 +135,6 @@ st.markdown("---")
 # ------------------------------------------------------------
 st.header("📊 Optionsanalyse für ausgewählte Aktien")
 
-if 'options_data' not in st.session_state:
-    st.session_state.options_data = None
-
 # === Eingabe der Ticker ===
 st.subheader("1️⃣ Aktienauswahl")
 tickers_input = st.text_area(
@@ -174,7 +181,7 @@ with col5:
 st.write("") 
 analyze_btn = st.button("🚀 Optionen abrufen & filtern", type="primary", use_container_width=True)
 
-# === Analyse durchführen ===
+# === SCHRITT A: REINE DATENBESCHAFFUNG (Nur bei Button-Klick) ===
 if analyze_btn and tickers_list and expiry_input:
     try:
         expiry_date = datetime.strptime(expiry_input, "%Y-%m-%d").date()
@@ -190,9 +197,9 @@ if analyze_btn and tickers_list and expiry_input:
         st.error("⚠️ Der minimale Strike kann nicht größer sein als der maximale Strike.")
         st.stop()
 
-    all_filtered_options = []
+    all_raw_options = []
 
-    with st.spinner("Lade und berechne Optionsdaten von Yahoo Finance..."):
+    with st.spinner("Lade Optionsdaten von Yahoo Finance..."):
         for symbol in tickers_list:
             try:
                 ticker = yf.Ticker(symbol)
@@ -207,17 +214,10 @@ if analyze_btn and tickers_list and expiry_input:
                 industry = info.get("industry", "N/A")
                 
                 div_rate = info.get("dividendRate") or info.get("trailingAnnualDividendRate") or 0
-                if div_rate > 0 and current_price and current_price > 0:
-                    div_yield_pct = (div_rate / current_price) * 100
-                else:
-                    div_yield_pct = 0.0
-                div_yield_str = f"{div_yield_pct:.2f}%"
+                div_yield_str = f"{(div_rate / current_price) * 100:.2f}%" if (div_rate > 0 and current_price and current_price > 0) else "0.00%"
 
                 earnings_date_val = get_robust_earnings_date(ticker, info)
-                if earnings_date_val:
-                    earnings_date_str = earnings_date_val.strftime("%Y-%m-%d")
-                else:
-                    earnings_date_str = "Unbekannt"
+                earnings_date_str = earnings_date_val.strftime("%Y-%m-%d") if earnings_date_val else "Unbekannt"
 
                 if not current_price or expiry_input not in ticker.options:
                     continue
@@ -232,179 +232,197 @@ if analyze_btn and tickers_list and expiry_input:
                 
                 resttage = (expiry_date - datetime.now().date()).days
                 resttage_calc = resttage if resttage > 0 else 1
-
                 puts["Rendite_%_p.a."] = ((puts["Prämie_$"] / (puts["strike"] * 100)) * (365 / resttage_calc) * 100)
 
-                # Basis-Filter (Rendite & Sicherheit)
-                filtered = puts[
-                    (puts["Sicherheitsabstand_%"] >= min_sicherheit) &
-                    (puts["Rendite_%_p.a."] >= min_rendite) &
-                    (puts["Rendite_%_p.a."] <= max_rendite)
-                ].copy()
-
-                # Zusätzliche Strike-Filter
-                if min_strike is not None:
-                    filtered = filtered[filtered["strike"] >= min_strike]
+                # Strukturierte Rohdaten erstellen
+                puts.insert(0, "Symbol", symbol)
+                puts.insert(1, "Company", company_name)
+                puts.insert(2, "Kurs", current_price)
+                puts.insert(3, "MarketCap", market_cap_str)
+                puts.insert(4, "Sector", sector)
+                puts.insert(5, "Industry", industry)
+                puts.insert(6, "DivYield", div_yield_str)
+                puts.insert(7, "EarningsDate", earnings_date_str)
                 
-                if max_strike is not None:
-                    filtered = filtered[filtered["strike"] <= max_strike]
-
-                if not filtered.empty:
-                    filtered.insert(0, "Favorit", False)
-                    filtered.insert(1, "Symbol", symbol)
-                    filtered.insert(2, "Company", company_name)
-                    filtered.insert(3, "Kurs", current_price)
-                    filtered.insert(4, "MarketCap", market_cap_str)
-                    filtered.insert(5, "Sector", sector)
-                    filtered.insert(6, "Industry", industry)
-                    filtered.insert(7, "DivYield", div_yield_str)
-                    filtered.insert(8, "EarningsDate", earnings_date_str)
-                    filtered.insert(9, "Delta", 0.00)           
-                    filtered.insert(10, "Chartbewertung", "")    
-                    
-                    all_filtered_options.append(filtered.sort_values("strike", ascending=True))
+                all_raw_options.append(puts)
 
             except Exception as e:
                 st.warning(f"Fehler bei {symbol}: {e}")
 
-    if all_filtered_options:
-        st.session_state.options_data = pd.concat(all_filtered_options, ignore_index=True)
+    if all_raw_options:
+        st.session_state.raw_options_data = pd.concat(all_raw_options, ignore_index=True)
     else:
-        st.session_state.options_data = pd.DataFrame()
+        st.session_state.raw_options_data = pd.DataFrame()
         st.warning("Keine Optionen gefunden, die deinen Kriterien entsprechen.")
 
 
-# === Ergebnisse & Interaktive Auswahl anzeigen ===
-if st.session_state.options_data is not None and not st.session_state.options_data.empty:
-    df_master = st.session_state.options_data
-    symbols_found = df_master['Symbol'].unique()
+# === SCHRITT B: LOKALE DYNAMISCHE FILTERUNG & UI ===
+if st.session_state.raw_options_data is not None and not st.session_state.raw_options_data.empty:
     
-    # 🆕 Berechnung der Metriken für die Überschrift
-    anzahl_aktien = len(symbols_found)
-    anzahl_optionen = len(df_master)
+    df_working = st.session_state.raw_options_data.copy()
+    
+    # Standard-Filter anwenden
+    df_filtered = df_working[
+        (df_working["Sicherheitsabstand_%"] >= min_sicherheit) &
+        (df_working["Rendite_%_p.a."] >= min_rendite) &
+        (df_working["Rendite_%_p.a."] <= max_rendite)
+    ]
+    
+    # Strike-Filter optional anwenden
+    if min_strike is not None:
+        df_filtered = df_filtered[df_filtered["strike"] >= min_strike]
+    if max_strike is not None:
+        df_filtered = df_filtered[df_filtered["strike"] <= max_strike]
 
-    # 🆕 Dynamische Überschrift mit den Ergebnissen
-    st.subheader(f"4️⃣ Ergebnisse & Auswahl ({anzahl_aktien} Aktien, {anzahl_optionen} Optionen gefunden)")
-    st.info("💡 Hake links die Optionen an, trag optional ein Delta ein und hinterlege deine Chart-Notizen. Alles wird unten gesammelt.")
+    if not df_filtered.empty:
+        symbols_found = df_filtered['Symbol'].unique()
+        anzahl_aktien = len(symbols_found)
+        anzahl_optionen = len(df_filtered)
 
-    updated_dfs = []
+        # Dynamische Überschrift mit KPIs
+        st.subheader(f"4️⃣ Ergebnisse & Auswahl ({anzahl_aktien} Aktien, {anzahl_optionen} Optionen gefunden)")
+        st.info("💡 Hake links die Optionen an, trag optional ein Delta ein und hinterlege deine Chart-Notizen. Alles wird unten gesammelt.")
 
-    for symbol in symbols_found:
-        df_sym = df_master[df_master['Symbol'] == symbol].copy()
-        company_name = df_sym['Company'].iloc[0]
-        current_price = df_sym['Kurs'].iloc[0]
-        market_cap_str = df_sym['MarketCap'].iloc[0]
-        
-        sector = df_sym['Sector'].iloc[0]
-        industry = df_sym['Industry'].iloc[0]
-        div_yield = df_sym['DivYield'].iloc[0]
-        earnings_date_str = df_sym['EarningsDate'].iloc[0]
+        final_processed_dfs = []
 
-        st.markdown(f"<hr style='border:3px solid #444;margin:20px 0;'>", unsafe_allow_html=True)
-        st.markdown(f"### 🟦 {symbol} — {company_name}")
-
-        oc_url = f"https://optioncharts.io/options/{symbol}/option-chain?option_type=put&expiration_dates={expiry_input}:m&view=list&strike_range=all"
-
-        # --- HTML Info-Tabelle KOMPAKT inkl. OptionCharts Button ---
-        info_html = f"""
-        <div style="display: flex; flex-wrap: wrap; gap: 10px; background-color: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #d1d5db; margin-bottom: 15px; font-size: 0.95em; text-align: center; color: #111827; align-items: center;">
-            <div style="flex: 1; min-width: 100px;">
-                <span style="color: #6b7280; font-size: 0.85em;">Kurs</span><br>
-                <b>${current_price:.2f}</b>
-            </div>
-            <div style="flex: 1; min-width: 120px;">
-                <span style="color: #6b7280; font-size: 0.85em;">Market Cap</span><br>
-                <b>{market_cap_str}</b>
-            </div>
-            <div style="flex: 1; min-width: 160px;">
-                <span style="color: #6b7280; font-size: 0.85em;">Sektor / Branche</span><br>
-                <b>{sector}</b><br><span style="font-size: 0.8em; color: #4b5563;">{industry}</span>
-            </div>
-            <div style="flex: 1; min-width: 100px;">
-                <span style="color: #6b7280; font-size: 0.85em;">Dividende</span><br>
-                <b>{div_yield}</b>
-            </div>
-            <div style="flex: 1; min-width: 120px;">
-                <span style="color: #6b7280; font-size: 0.85em;">Nächste Earnings</span><br>
-                <b>{earnings_date_str}</b>
-            </div>
-            <div style="flex: 1; min-width: 180px;">
-                <a href="{oc_url}" target="_blank" style="display: inline-block; padding: 8px 12px; color: white; background-color: #1f2937; border-radius: 5px; text-decoration: none; font-size: 0.85em; width: 100%; box-sizing: border-box; transition: 0.2s;">
-                    🔗 IV-Rank prüfen (OptionCharts)
-                </a>
-            </div>
-        </div>
-        """
-        st.markdown(info_html, unsafe_allow_html=True)
-
-        chart_html = f"""
-        <div class="tradingview-widget-container" style="height:380px;width:100%;margin-bottom:10px;">
-          <div id="tradingview_{symbol.lower()}"></div>
-          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-          <script type="text/javascript">
-            new TradingView.widget({{
-              "width": "100%",
-              "height": "380",
-              "symbol": "{symbol}",
-              "interval": "D",
-              "timezone": "Etc/UTC",
-              "theme": "dark",
-              "style": "1",
-              "locale": "en",
-              "hide_side_toolbar": true,
-              "allow_symbol_change": false,
-              "save_image": false,
-              "studies": [
-                {{"id": "MASimple@tv-basicstudies", "inputs": {{"length": 50}}}},
-                {{"id": "MASimple@tv-basicstudies", "inputs": {{"length": 100}}}},
-                {{"id": "MASimple@tv-basicstudies", "inputs": {{"length": 200}}}}
-              ],
-              "container_id": "tradingview_{symbol.lower()}"
-            }});
-          </script>
-        </div>
-        """
-        with st.expander(f"📈 Chart anzeigen ({symbol})", expanded=False):
-            components.html(chart_html, height=400)
+        for symbol in symbols_found:
+            df_sym = df_filtered[df_filtered['Symbol'] == symbol].copy().sort_values("strike", ascending=True)
             
-        chart_bewertung = st.text_input(
-            f"✍️ Chartanalyse Bewertung für {symbol}:",
-            value=df_sym['Chartbewertung'].iloc[0],
-            key=f"chart_bewertung_{symbol}",
-            placeholder="Z.B. Aufwärtstrend intakt, prallt am SMA50 ab..."
-        )
-        df_sym['Chartbewertung'] = chart_bewertung
+            company_name = df_sym['Company'].iloc[0]
+            current_price = df_sym['Kurs'].iloc[0]
+            market_cap_str = df_sym['MarketCap'].iloc[0]
+            sector = df_sym['Sector'].iloc[0]
+            industry = df_sym['Industry'].iloc[0]
+            div_yield = df_sym['DivYield'].iloc[0]
+            earnings_date_str = df_sym['EarningsDate'].iloc[0]
 
-        display_cols = ["Favorit", "strike", "bid", "ask", "volume", "IV_%", "Rendite_%_p.a.", "Sicherheitsabstand_%", "Delta"] 
-        
-        edited_df = st.data_editor(
-            df_sym[display_cols],
-            column_config={
-                "Favorit": st.column_config.CheckboxColumn("⭐ Auswahl", default=False),
-                "strike": st.column_config.NumberColumn("Strike ($)", format="%.2f"),
-                "bid": st.column_config.NumberColumn("Bid", format="%.2f"),
-                "ask": st.column_config.NumberColumn("Ask", format="%.2f"),
-                "IV_%": st.column_config.NumberColumn("IV (%)", format="%.1f"), 
-                "Rendite_%_p.a.": st.column_config.NumberColumn("Rendite p.a. (%)", format="%.1f"),
-                "Sicherheitsabstand_%": st.column_config.NumberColumn("Sicherheit (%)", format="%.1f"),
-                "Delta": st.column_config.NumberColumn("Delta", format="%.2f", step=0.01),
-            },
-            disabled=["strike", "bid", "ask", "volume", "IV_%", "Rendite_%_p.a.", "Sicherheitsabstand_%"],
-            hide_index=True,
-            key=f"editor_{symbol}",
-            use_container_width=True
-        )
+            st.markdown(f"<hr style='border:3px solid #444;margin:20px 0;'>", unsafe_allow_html=True)
+            st.markdown(f"### 🟦 {symbol} — {company_name}")
 
-        df_sym['Favorit'] = edited_df['Favorit']
-        df_sym['Delta'] = edited_df['Delta'] 
-        
-        updated_dfs.append(df_sym)
+            oc_url = f"https://optioncharts.io/options/{symbol}/option-chain?option_type=put&expiration_dates={expiry_input}:m&view=list&strike_range=all"
 
-    st.session_state.options_data = pd.concat(updated_dfs, ignore_index=True)
+            # --- HTML Info-Tabelle ---
+            info_html = f"""
+            <div style="display: flex; flex-wrap: wrap; gap: 10px; background-color: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #d1d5db; margin-bottom: 15px; font-size: 0.95em; text-align: center; color: #111827; align-items: center;">
+                <div style="flex: 1; min-width: 100px;">
+                    <span style="color: #6b7280; font-size: 0.85em;">Kurs</span><br>
+                    <b>${current_price:.2f}</b>
+                </div>
+                <div style="flex: 1; min-width: 120px;">
+                    <span style="color: #6b7280; font-size: 0.85em;">Market Cap</span><br>
+                    <b>{market_cap_str}</b>
+                </div>
+                <div style="flex: 1; min-width: 160px;">
+                    <span style="color: #6b7280; font-size: 0.85em;">Sektor / Branche</span><br>
+                    <b>{sector}</b><br><span style="font-size: 0.8em; color: #4b5563;">{industry}</span>
+                </div>
+                <div style="flex: 1; min-width: 100px;">
+                    <span style="color: #6b7280; font-size: 0.85em;">Dividende</span><br>
+                    <b>{div_yield}</b>
+                </div>
+                <div style="flex: 1; min-width: 120px;">
+                    <span style="color: #6b7280; font-size: 0.85em;">Nächste Earnings</span><br>
+                    <b>{earnings_date_str}</b>
+                </div>
+                <div style="flex: 1; min-width: 180px;">
+                    <a href="{oc_url}" target="_blank" style="display: inline-block; padding: 8px 12px; color: white; background-color: #1f2937; border-radius: 5px; text-decoration: none; font-size: 0.85em; width: 100%; box-sizing: border-box; transition: 0.2s;">
+                        🔗 IV-Rank prüfen (OptionCharts)
+                    </a>
+                </div>
+            </div>
+            """
+            st.markdown(info_html, unsafe_allow_html=True)
 
-    # ------------------------------------------------------------
-    # ⭐ WATCHLIST BEREICH
-    # ------------------------------------------------------------
+            # --- TradingView Chart ---
+            chart_html = f"""
+            <div class="tradingview-widget-container" style="height:380px;width:100%;margin-bottom:10px;">
+              <div id="tradingview_{symbol.lower()}"></div>
+              <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+              <script type="text/javascript">
+                new TradingView.widget({{
+                  "width": "100%",
+                  "height": "380",
+                  "symbol": "{symbol}",
+                  "interval": "D",
+                  "timezone": "Etc/UTC",
+                  "theme": "dark",
+                  "style": "1",
+                  "locale": "en",
+                  "hide_side_toolbar": true,
+                  "allow_symbol_change": false,
+                  "save_image": false,
+                  "studies": [
+                    {{"id": "MASimple@tv-basicstudies", "inputs": {{"length": 50}}}},
+                    {{"id": "MASimple@tv-basicstudies", "inputs": {{"length": 100}}}},
+                    {{"id": "MASimple@tv-basicstudies", "inputs": {{"length": 200}}}}
+                  ],
+                  "container_id": "tradingview_{symbol.lower()}"
+                }});
+              </script>
+            </div>
+            """
+            with st.expander(f"📈 Chart anzeigen ({symbol})", expanded=False):
+                components.html(chart_html, height=400)
+                
+            # Chartbewertung aus Session State laden / speichern
+            current_chart_val = st.session_state.storage_charts.get(symbol, "")
+            chart_bewertung = st.text_input(
+                f"✍️ Chartanalyse Bewertung für {symbol}:",
+                value=current_chart_val,
+                key=f"chart_bewertung_{symbol}",
+                placeholder="Z.B. Aufwärtstrend intakt, prallt am SMA50 ab..."
+            )
+            st.session_state.storage_charts[symbol] = chart_bewertung
+            df_sym['Chartbewertung'] = chart_bewertung
+
+            # Vorhandene Zustände für Favorit & Delta aus dem persistenten Speicher mappen
+            df_sym['Favorit'] = df_sym.apply(lambda r: st.session_state.storage_favoriten.get(f"{symbol}_{r['strike']}", False), axis=1)
+            df_sym['Delta'] = df_sym.apply(lambda r: st.session_state.storage_delta.get(f"{symbol}_{r['strike']}", 0.00), axis=1)
+
+            display_cols = ["Favorit", "strike", "bid", "ask", "volume", "IV_%", "Rendite_%_p.a.", "Sicherheitsabstand_%", "Delta"] 
+            
+            edited_df = st.data_editor(
+                df_sym[display_cols],
+                column_config={
+                    "Favorit": st.column_config.CheckboxColumn("⭐ Auswahl", default=False),
+                    "strike": st.column_config.NumberColumn("Strike ($)", format="%.2f"),
+                    "bid": st.column_config.NumberColumn("Bid", format="%.2f"),
+                    "ask": st.column_config.NumberColumn("Ask", format="%.2f"),
+                    "IV_%": st.column_config.NumberColumn("IV (%)", format="%.1f"), 
+                    "Rendite_%_p.a.": st.column_config.NumberColumn("Rendite p.a. (%)", format="%.1f"),
+                    "Sicherheitsabstand_%": st.column_config.NumberColumn("Sicherheit (%)", format="%.1f"),
+                    "Delta": st.column_config.NumberColumn("Delta", format="%.2f", step=0.01),
+                },
+                disabled=["strike", "bid", "ask", "volume", "IV_%", "Rendite_%_p.a.", "Sicherheitsabstand_%"],
+                hide_index=True,
+                key=f"editor_{symbol}",
+                use_container_width=True
+            )
+
+            # Eingaben zeilenweise zurück in den permanenten Speicher schreiben
+            for i in range(len(df_sym)):
+                strike_val = df_sym.iloc[i]['strike']
+                fav_val = edited_df.iloc[i]['Favorit']
+                delta_val = edited_df.iloc[i]['Delta']
+                
+                st.session_state.storage_favoriten[f"{symbol}_{strike_val}"] = fav_val
+                st.session_state.storage_delta[f"{symbol}_{strike_val}"] = delta_val
+
+            df_sym['Favorit'] = edited_df['Favorit'].values
+            df_sym['Delta'] = edited_df['Delta'].values
+            
+            final_processed_dfs.append(df_sym)
+
+        # Zusammenfassung aller modifizierten DataFrames
+        st.session_state.options_data = pd.concat(final_processed_dfs, ignore_index=True)
+    else:
+        st.warning("Keine Optionen entsprechen deinen aktuellen Filtereinstellungen. Passe die Regler an.")
+
+
+# ------------------------------------------------------------
+# ⭐ WATCHLIST BEREICH
+# ------------------------------------------------------------
+if st.session_state.options_data is not None and not st.session_state.options_data.empty:
     st.markdown(f"<hr style='border:5px solid #2ecc71;margin:50px 0 20px 0;'>", unsafe_allow_html=True)
     st.header("🎯 Deine selektierten Favoriten")
 
