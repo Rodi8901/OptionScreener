@@ -248,6 +248,9 @@ if analyze_btn and tickers_list and expiry_input:
 
             except Exception as e:
                 st.warning(f"Fehler bei {symbol}: {e}")
+            
+            # 🆕 WICHTIG: 1.5 Sekunden Pause nach jedem Ticker, um HTTP 429 (Rate Limits) zu vermeiden
+            time.sleep(1.5)
 
     if all_raw_options:
         st.session_state.raw_options_data = pd.concat(all_raw_options, ignore_index=True)
