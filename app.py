@@ -159,13 +159,19 @@ else:
 
 # === Filter-Einstellungen ===
 st.subheader("3️⃣ Filtereinstellungen")
-col1, col2, col3 = st.columns(3)
+# 🆕 Auf 5 Spalten erweitert für die neuen Strike-Filter
+col1, col2, col3, col4, col5 = st.columns(5)
 with col1:
     min_rendite = st.number_input("Min. Rendite p.a. (%)", 0.0, 500.0, 12.0, step=0.5)
 with col2:
     max_rendite = st.number_input("Max. Rendite p.a. (%)", 0.0, 500.0, 40.0, step=0.5)
 with col3:
-    min_sicherheit = st.number_input("Min. Sicherheitsabstand (%)", 0.0, 100.0, 7.0, step=0.5)
+    min_sicherheit = st.number_input("Min. Sicherheit (%)", 0.0, 100.0, 7.0, step=0.5)
+with col4:
+    # 🆕 value=None sorgt dafür, dass das Feld standardmäßig leer ist
+    min_strike = st.number_input("Min. Strike ($)", min_value=0.0, value=None, step=5.0, placeholder="Leer = aus")
+with col5:
+    max_strike = st.number_input("Max. Strike ($)", min_value=0.0, value=None, step=5.0, placeholder="Leer = aus")
 
 st.write("") 
 analyze_btn = st.button("🚀 Optionen abrufen & filtern", type="primary", use_container_width=True)
@@ -180,6 +186,10 @@ if analyze_btn and tickers_list and expiry_input:
 
     if min_rendite > max_rendite:
         st.error("⚠️ Die minimale Rendite kann nicht größer sein als die maximale Rendite.")
+        st.stop()
+        
+    if min_strike is not None and max_strike is not None and min_strike > max_strike:
+        st.error("⚠️ Der minimale Strike kann nicht größer sein als der maximale Strike.")
         st.stop()
 
     all_filtered_options = []
@@ -227,11 +237,19 @@ if analyze_btn and tickers_list and expiry_input:
 
                 puts["Rendite_%_p.a."] = ((puts["Prämie_$"] / (puts["strike"] * 100)) * (365 / resttage_calc) * 100)
 
+                # Basis-Filter (Rendite & Sicherheit)
                 filtered = puts[
                     (puts["Sicherheitsabstand_%"] >= min_sicherheit) &
                     (puts["Rendite_%_p.a."] >= min_rendite) &
                     (puts["Rendite_%_p.a."] <= max_rendite)
                 ].copy()
+
+                # 🆕 Zusätzliche Strike-Filter (werden nur angewandt, wenn das Feld nicht leer ist)
+                if min_strike is not None:
+                    filtered = filtered[filtered["strike"] >= min_strike]
+                
+                if max_strike is not None:
+                    filtered = filtered[filtered["strike"] <= max_strike]
 
                 if not filtered.empty:
                     filtered.insert(0, "Favorit", False)
@@ -243,8 +261,8 @@ if analyze_btn and tickers_list and expiry_input:
                     filtered.insert(6, "Industry", industry)
                     filtered.insert(7, "DivYield", div_yield_str)
                     filtered.insert(8, "EarningsDate", earnings_date_str)
-                    filtered.insert(9, "Delta", 0.00)           # 🆕 Leeres Delta Feld
-                    filtered.insert(10, "Chartbewertung", "")    # 🆕 Leeres Feld für Chart-Bewertung
+                    filtered.insert(9, "Delta", 0.00)           
+                    filtered.insert(10, "Chartbewertung", "")    
                     
                     all_filtered_options.append(filtered.sort_values("strike", ascending=True))
 
@@ -345,17 +363,14 @@ if st.session_state.options_data is not None and not st.session_state.options_da
         with st.expander(f"📈 Chart anzeigen ({symbol})", expanded=False):
             components.html(chart_html, height=400)
             
-        # 🆕 Eingabefeld für Chartbewertung (außerhalb des Expanders, damit man es sofort sieht)
         chart_bewertung = st.text_input(
             f"✍️ Chartanalyse Bewertung für {symbol}:",
             value=df_sym['Chartbewertung'].iloc[0],
             key=f"chart_bewertung_{symbol}",
             placeholder="Z.B. Aufwärtstrend intakt, prallt am SMA50 ab..."
         )
-        # Den geschriebenen Text in unser DataFrame übernehmen
         df_sym['Chartbewertung'] = chart_bewertung
 
-        # 🆕 Anzeige-Spalten um "Delta" erweitert
         display_cols = ["Favorit", "strike", "bid", "ask", "volume", "IV_%", "Rendite_%_p.a.", "Sicherheitsabstand_%", "Delta"] 
         
         edited_df = st.data_editor(
@@ -368,9 +383,8 @@ if st.session_state.options_data is not None and not st.session_state.options_da
                 "IV_%": st.column_config.NumberColumn("IV (%)", format="%.1f"), 
                 "Rendite_%_p.a.": st.column_config.NumberColumn("Rendite p.a. (%)", format="%.1f"),
                 "Sicherheitsabstand_%": st.column_config.NumberColumn("Sicherheit (%)", format="%.1f"),
-                "Delta": st.column_config.NumberColumn("Delta", format="%.2f", step=0.01), # 🆕 Config für Delta hinzugefügt
+                "Delta": st.column_config.NumberColumn("Delta", format="%.2f", step=0.01),
             },
-            # 🆕 Delta ist NICHT in der "disabled"-Liste, bleibt also editierbar!
             disabled=["strike", "bid", "ask", "volume", "IV_%", "Rendite_%_p.a.", "Sicherheitsabstand_%"],
             hide_index=True,
             key=f"editor_{symbol}",
@@ -378,7 +392,7 @@ if st.session_state.options_data is not None and not st.session_state.options_da
         )
 
         df_sym['Favorit'] = edited_df['Favorit']
-        df_sym['Delta'] = edited_df['Delta'] # 🆕 Übernahme des manuell eingetippten Deltas
+        df_sym['Delta'] = edited_df['Delta'] 
         
         updated_dfs.append(df_sym)
 
@@ -393,7 +407,6 @@ if st.session_state.options_data is not None and not st.session_state.options_da
     favs = st.session_state.options_data[st.session_state.options_data['Favorit'] == True].copy()
 
     if not favs.empty:
-        # 🆕 Spalten für die finale Watchlist um Delta und Chartbewertung ergänzt
         fav_display = favs[["Symbol", "Company", "strike", "bid", "ask", "IV_%", "Rendite_%_p.a.", "Sicherheitsabstand_%", "Delta", "EarningsDate", "DivYield", "Chartbewertung"]] 
         
         st.dataframe(
@@ -407,10 +420,10 @@ if st.session_state.options_data is not None and not st.session_state.options_da
                 "IV_%": st.column_config.NumberColumn("IV (%)", format="%.1f"),
                 "Rendite_%_p.a.": st.column_config.NumberColumn("Rendite p.a. (%)", format="%.2f"),
                 "Sicherheitsabstand_%": st.column_config.NumberColumn("Sicherheit (%)", format="%.2f"),
-                "Delta": st.column_config.NumberColumn("Delta", format="%.2f"), # 🆕
+                "Delta": st.column_config.NumberColumn("Delta", format="%.2f"),
                 "EarningsDate": st.column_config.TextColumn("Earnings am"),
                 "DivYield": st.column_config.TextColumn("Dividende"),
-                "Chartbewertung": st.column_config.TextColumn("Chartbewertung"), # 🆕
+                "Chartbewertung": st.column_config.TextColumn("Chartbewertung"), 
             }
         )
 
