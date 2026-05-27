@@ -159,7 +159,6 @@ else:
 
 # === Filter-Einstellungen ===
 st.subheader("3️⃣ Filtereinstellungen")
-# 🆕 Auf 5 Spalten erweitert für die neuen Strike-Filter
 col1, col2, col3, col4, col5 = st.columns(5)
 with col1:
     min_rendite = st.number_input("Min. Rendite p.a. (%)", 0.0, 500.0, 12.0, step=0.5)
@@ -168,7 +167,6 @@ with col2:
 with col3:
     min_sicherheit = st.number_input("Min. Sicherheit (%)", 0.0, 100.0, 7.0, step=0.5)
 with col4:
-    # 🆕 value=None sorgt dafür, dass das Feld standardmäßig leer ist
     min_strike = st.number_input("Min. Strike ($)", min_value=0.0, value=None, step=5.0, placeholder="Leer = aus")
 with col5:
     max_strike = st.number_input("Max. Strike ($)", min_value=0.0, value=None, step=5.0, placeholder="Leer = aus")
@@ -244,7 +242,7 @@ if analyze_btn and tickers_list and expiry_input:
                     (puts["Rendite_%_p.a."] <= max_rendite)
                 ].copy()
 
-                # 🆕 Zusätzliche Strike-Filter (werden nur angewandt, wenn das Feld nicht leer ist)
+                # Zusätzliche Strike-Filter
                 if min_strike is not None:
                     filtered = filtered[filtered["strike"] >= min_strike]
                 
@@ -278,12 +276,18 @@ if analyze_btn and tickers_list and expiry_input:
 
 # === Ergebnisse & Interaktive Auswahl anzeigen ===
 if st.session_state.options_data is not None and not st.session_state.options_data.empty:
-    st.subheader("4️⃣ Ergebnisse & Auswahl")
+    df_master = st.session_state.options_data
+    symbols_found = df_master['Symbol'].unique()
+    
+    # 🆕 Berechnung der Metriken für die Überschrift
+    anzahl_aktien = len(symbols_found)
+    anzahl_optionen = len(df_master)
+
+    # 🆕 Dynamische Überschrift mit den Ergebnissen
+    st.subheader(f"4️⃣ Ergebnisse & Auswahl ({anzahl_aktien} Aktien, {anzahl_optionen} Optionen gefunden)")
     st.info("💡 Hake links die Optionen an, trag optional ein Delta ein und hinterlege deine Chart-Notizen. Alles wird unten gesammelt.")
 
-    df_master = st.session_state.options_data
     updated_dfs = []
-    symbols_found = df_master['Symbol'].unique()
 
     for symbol in symbols_found:
         df_sym = df_master[df_master['Symbol'] == symbol].copy()
@@ -423,17 +427,4 @@ if st.session_state.options_data is not None and not st.session_state.options_da
                 "Delta": st.column_config.NumberColumn("Delta", format="%.2f"),
                 "EarningsDate": st.column_config.TextColumn("Earnings am"),
                 "DivYield": st.column_config.TextColumn("Dividende"),
-                "Chartbewertung": st.column_config.TextColumn("Chartbewertung"), 
-            }
-        )
-
-        csv_fav = fav_display.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="📥 Watchlist als CSV exportieren",
-            data=csv_fav,
-            file_name=f"CSP_Watchlist_{expiry_input}.csv",
-            mime="text/csv",
-            type="primary"
-        )
-    else:
-        st.info("Noch keine Optionen ausgewählt. Setze bei den Ergebnissen oben einen Haken, um sie hier zu sammeln.")
+                "Chartbewertung": st.column
