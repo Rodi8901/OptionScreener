@@ -175,72 +175,7 @@ st.write("")
 analyze_btn = st.button("🚀 Optionen abrufen & filtern", type="primary", use_container_width=True)
 
 # === Analyse durchführen ===
-
-@st.cache_data(ttl=1800)
-def load_option_data(symbol, expiry):
-    """
-    Lädt gecachte Optionsdaten von Yahoo Finance.
-    Cache gültig für 30 Minuten.
-    """
-
-    ticker = yf.Ticker(symbol)
-
-    # -------- Retry für Optionen --------
-    retries = 3
-
-    for attempt in range(retries):
-        try:
-            options = ticker.options
-
-            if expiry not in options:
-                return None
-
-            chain = ticker.option_chain(expiry)
-
-            return {
-                "puts": chain.puts,
-                "options": options
-            }
-
-        except Exception as e:
-            if "Too Many Requests" in str(e):
-                wait_time = (attempt + 1) * 3
-                time.sleep(wait_time)
-            else:
-                raise e
-
-    return None
-
-
-@st.cache_data(ttl=1800)
-def load_basic_info(symbol):
-    """
-    Lädt Basisdaten mit möglichst wenig Requests.
-    """
-
-    ticker = yf.Ticker(symbol)
-
-    # ---------- FAST INFO ----------
-    try:
-        fast_info = ticker.fast_info
-    except Exception:
-        fast_info = {}
-
-    # ---------- INFO ----------
-    # Nur EINMAL laden
-    try:
-        info = ticker.get_info()
-    except Exception:
-        info = {}
-
-    return {
-        "fast_info": fast_info,
-        "info": info
-    }
-
-
 if analyze_btn and tickers_list and expiry_input:
-
     try:
         expiry_date = datetime.strptime(expiry_input, "%Y-%m-%d").date()
     except ValueError:
@@ -250,175 +185,71 @@ if analyze_btn and tickers_list and expiry_input:
     if min_rendite > max_rendite:
         st.error("⚠️ Die minimale Rendite kann nicht größer sein als die maximale Rendite.")
         st.stop()
-
-    if (
-        min_strike is not None
-        and max_strike is not None
-        and min_strike > max_strike
-    ):
+        
+    if min_strike is not None and max_strike is not None and min_strike > max_strike:
         st.error("⚠️ Der minimale Strike kann nicht größer sein als der maximale Strike.")
         st.stop()
 
     all_filtered_options = []
 
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-
     with st.spinner("Lade und berechne Optionsdaten von Yahoo Finance..."):
-
-        for idx, symbol in enumerate(tickers_list):
-
+        for symbol in tickers_list:
             try:
-
-                status_text.text(
-                    f"{idx+1}/{len(tickers_list)} → Lade {symbol}..."
-                )
-
-                # =========================================================
-                # BASISDATEN LADEN
-                # =========================================================
-
-                basic_data = load_basic_info(symbol)
-
-                fast_info = basic_data["fast_info"]
-                info = basic_data["info"]
-
-                current_price = (
-                    fast_info.get("lastPrice")
-                    or info.get("regularMarketPrice")
-                )
-
-                if not current_price:
-                    continue
-
-                company_name = info.get("shortName", symbol)
-
+                ticker = yf.Ticker(symbol)
+                info = ticker.info
+                current_price = info.get("regularMarketPrice", None)
+                company_name = info.get("shortName", "")
+                
                 market_cap_raw = info.get("marketCap", 0)
-
-                market_cap_str = (
-                    f"{market_cap_raw / 1e9:.2f} Mrd. USD"
-                    if market_cap_raw
-                    else "n/a"
-                )
+                market_cap_str = f"{market_cap_raw / 1e9:.2f} Mrd. USD" if market_cap_raw else "n/a"
 
                 sector = info.get("sector", "N/A")
                 industry = info.get("industry", "N/A")
-
-                div_rate = (
-                    info.get("dividendRate")
-                    or info.get("trailingAnnualDividendRate")
-                    or 0
-                )
-
-                if div_rate > 0:
+                
+                div_rate = info.get("dividendRate") or info.get("trailingAnnualDividendRate") or 0
+                if div_rate > 0 and current_price and current_price > 0:
                     div_yield_pct = (div_rate / current_price) * 100
                 else:
                     div_yield_pct = 0.0
-
                 div_yield_str = f"{div_yield_pct:.2f}%"
 
-                # =========================================================
-                # EARNINGS
-                # =========================================================
+                earnings_date_val = get_robust_earnings_date(ticker, info)
+                if earnings_date_val:
+                    earnings_date_str = earnings_date_val.strftime("%Y-%m-%d")
+                else:
+                    earnings_date_str = "Unbekannt"
 
-                earnings_date_val = get_robust_earnings_date(
-                    yf.Ticker(symbol),
-                    info
-                )
-
-                earnings_date_str = (
-                    earnings_date_val.strftime("%Y-%m-%d")
-                    if earnings_date_val
-                    else "Unbekannt"
-                )
-
-                # =========================================================
-                # OPTIONSDATEN LADEN
-                # =========================================================
-
-                option_data = load_option_data(symbol, expiry_input)
-
-                if option_data is None:
+                if not current_price or expiry_input not in ticker.options:
                     continue
 
-                puts = option_data["puts"].copy()
+                chain = ticker.option_chain(expiry_input)
+                puts = chain.puts.copy()
+                puts = puts[["strike", "lastPrice", "bid", "ask", "volume", "impliedVolatility"]].fillna(0)
 
-                # =========================================================
-                # NUR RELEVANTE SPALTEN
-                # =========================================================
-
-                puts = puts[
-                    [
-                        "strike",
-                        "lastPrice",
-                        "bid",
-                        "ask",
-                        "volume",
-                        "impliedVolatility"
-                    ]
-                ].fillna(0)
-
-                # =========================================================
-                # BERECHNUNGEN
-                # =========================================================
-
-                puts["Sicherheitsabstand_%"] = (
-                    (current_price - puts["strike"])
-                    / current_price
-                    * 100
-                )
-
+                puts["Sicherheitsabstand_%"] = (current_price - puts["strike"]) / current_price * 100
                 puts["Prämie_$"] = puts["bid"] * 100
+                puts["IV_%"] = puts["impliedVolatility"] * 100 
+                
+                resttage = (expiry_date - datetime.now().date()).days
+                resttage_calc = resttage if resttage > 0 else 1
 
-                puts["IV_%"] = (
-                    puts["impliedVolatility"] * 100
-                )
+                puts["Rendite_%_p.a."] = ((puts["Prämie_$"] / (puts["strike"] * 100)) * (365 / resttage_calc) * 100)
 
-                resttage = (
-                    expiry_date - datetime.now().date()
-                ).days
-
-                resttage_calc = max(resttage, 1)
-
-                puts["Rendite_%_p.a."] = (
-                    (
-                        puts["Prämie_$"]
-                        / (puts["strike"] * 100)
-                    )
-                    * (365 / resttage_calc)
-                    * 100
-                )
-
-                # =========================================================
-                # FILTER
-                # =========================================================
-
+                # Basis-Filter (Rendite & Sicherheit)
                 filtered = puts[
-                    (puts["Sicherheitsabstand_%"] >= min_sicherheit)
-                    &
-                    (puts["Rendite_%_p.a."] >= min_rendite)
-                    &
+                    (puts["Sicherheitsabstand_%"] >= min_sicherheit) &
+                    (puts["Rendite_%_p.a."] >= min_rendite) &
                     (puts["Rendite_%_p.a."] <= max_rendite)
                 ].copy()
 
-                # ---------- STRIKE FILTER ----------
-
+                # Zusätzliche Strike-Filter
                 if min_strike is not None:
-                    filtered = filtered[
-                        filtered["strike"] >= min_strike
-                    ]
-
+                    filtered = filtered[filtered["strike"] >= min_strike]
+                
                 if max_strike is not None:
-                    filtered = filtered[
-                        filtered["strike"] <= max_strike
-                    ]
-
-                # =========================================================
-                # RESULTATE
-                # =========================================================
+                    filtered = filtered[filtered["strike"] <= max_strike]
 
                 if not filtered.empty:
-
                     filtered.insert(0, "Favorit", False)
                     filtered.insert(1, "Symbol", symbol)
                     filtered.insert(2, "Company", company_name)
@@ -428,55 +259,19 @@ if analyze_btn and tickers_list and expiry_input:
                     filtered.insert(6, "Industry", industry)
                     filtered.insert(7, "DivYield", div_yield_str)
                     filtered.insert(8, "EarningsDate", earnings_date_str)
-                    filtered.insert(9, "Delta", 0.00)
-                    filtered.insert(10, "Chartbewertung", "")
-
-                    all_filtered_options.append(
-                        filtered.sort_values(
-                            "strike",
-                            ascending=True
-                        )
-                    )
-
-                # =========================================================
-                # WICHTIG → RATE LIMIT SCHUTZ
-                # =========================================================
-
-                time.sleep(0.6)
+                    filtered.insert(9, "Delta", 0.00)           
+                    filtered.insert(10, "Chartbewertung", "")    
+                    
+                    all_filtered_options.append(filtered.sort_values("strike", ascending=True))
 
             except Exception as e:
-
                 st.warning(f"Fehler bei {symbol}: {e}")
 
-                # Extra warten bei Fehlern
-                time.sleep(2)
-
-            progress_bar.progress(
-                (idx + 1) / len(tickers_list)
-            )
-
-    # =========================================================
-    # ERGEBNISSE
-    # =========================================================
-
     if all_filtered_options:
-
-        st.session_state.options_data = pd.concat(
-            all_filtered_options,
-            ignore_index=True
-        )
-
-        st.success(
-            f"✅ {len(st.session_state.options_data)} Optionen gefunden."
-        )
-
+        st.session_state.options_data = pd.concat(all_filtered_options, ignore_index=True)
     else:
-
         st.session_state.options_data = pd.DataFrame()
-
-        st.warning(
-            "Keine Optionen gefunden, die deinen Kriterien entsprechen."
-        )
+        st.warning("Keine Optionen gefunden, die deinen Kriterien entsprechen.")
 
 
 # === Ergebnisse & Interaktive Auswahl anzeigen ===
